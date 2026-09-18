@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Runtime dependencies -- everything needed to RUN the dashboard.
+#
+# Note what is absent: TensorFlow. The backend never imports it. Inference runs
+# on the dependency-free NumPy kernel in ai/runtime.py, executing weights that
+# were folded and exported at training time. That is the whole point of the
+# "edge" story, and it is why the API starts in under a second.
+# ---------------------------------------------------------------------------
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.14.0
+websockets==15.0.1
+
+SQLAlchemy==2.0.45
+
+numpy==2.4.2
+scipy==1.16.3
+
+reportlab==4.4.7
+
+
+# ---------------------------------------------------------------------------
+# Training dependencies -- only needed to RETRAIN the model (python -m ai.train).
+# Install with:  pip install -r requirements.txt -r requirements-train.txt
+# ---------------------------------------------------------------------------
+# tensorflow==2.20.0
+# pandas==2.3.3
+
+
+# ---------------------------------------------------------------------------
+# Development / test dependencies
+# ---------------------------------------------------------------------------
+# pytest==9.1.1
+# httpx==0.27.2

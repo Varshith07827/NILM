@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Project data
+database/*.db
+database/*.db-wal
+database/*.db-shm
+database/recordings/*.jsonl
+reports/nilm-*.csv
+reports/nilm-*.pdf
+
+# Trained model artefacts are large; regenerate with `python -m ai.train`.
+# Comment these out if you want to commit a trained model with the project.
+ai/artifacts/*.keras
+ai/artifacts/*.tflite
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,7 @@
+# Build-time only: needed to retrain and re-export the classifier.
+# The running dashboard does not import any of this.
+#
+#   python -m ai.train --windows 72000 --epochs 18
+#
+tensorflow==2.20.0
+pandas==2.3.3

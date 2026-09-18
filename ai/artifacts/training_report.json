@@ -1,0 +1,145 @@
+{
+  "per_appliance": {
+    "fan": {
+      "name": "Ceiling Fan",
+      "support": 6167,
+      "base_rate": 0.4282638888888889,
+      "threshold": 0.3400000035762787,
+      "precision": 0.6926971269459562,
+      "recall": 0.8874655424031134,
+      "f1": 0.7780779073073643,
+      "accuracy": 0.7831944444444444
+    },
+    "led_light": {
+      "name": "LED Light",
+      "support": 6659,
+      "base_rate": 0.46243055555555557,
+      "threshold": 0.33000001311302185,
+      "precision": 0.7276259714214088,
+      "recall": 0.8717525153927016,
+      "f1": 0.7931953269112523,
+      "accuracy": 0.7897916666666667
+    },
+    "tube_light": {
+      "name": "Tube Light",
+      "support": 5289,
+      "base_rate": 0.3672916666666667,
+      "threshold": 0.49000000953674316,
+      "precision": 0.8291050035236082,
+      "recall": 0.8897712232936282,
+      "f1": 0.8583675330597356,
+      "accuracy": 0.8921527777777778
+    },
+    "tv": {
+      "name": "Television",
+      "support": 5749,
+      "base_rate": 0.3992361111111111,
+      "threshold": 0.5199999809265137,
+      "precision": 0.9188459591699004,
+      "recall": 0.9472951817707428,
+      "f1": 0.9328537170263789,
+      "accuracy": 0.9455555555555556
+    },
+    "refrigerator": {
+      "name": "Refrigerator",
+      "support": 10052,
+      "base_rate": 0.6980555555555555,
+      "threshold": 0.2199999988079071,
+      "precision": 0.9770886825992494,
+      "recall": 0.9842817349781138,
+      "f1": 0.9806720190306274,
+      "accuracy": 0.9729166666666667
+    },
+    "mixer": {
+      "name": "Mixer Grinder",
+      "support": 5001,
+      "base_rate": 0.34729166666666667,
+      "threshold": 0.30000001192092896,
+      "precision": 0.9944145222421703,
+      "recall": 0.9968006398720256,
+      "f1": 0.9956061513880567,
+      "accuracy": 0.9969444444444444
+    },
+    "washing_machine": {
+      "name": "Washing Machine",
+      "support": 4434,
+      "base_rate": 0.30791666666666667,
+      "threshold": 0.9200000166893005,
+      "precision": 0.960895291998971,
+      "recall": 0.8423545331529093,
+      "f1": 0.8977286383848095,
+      "accuracy": 0.9409027777777778
+    },
+    "air_conditioner": {
+      "name": "Air Conditioner",
+      "support": 6497,
+      "base_rate": 0.45118055555555553,
+      "threshold": 0.1899999976158142,
+      "precision": 0.9998461064943059,
+      "recall": 1.0,
+      "f1": 0.9999230473258945,
+      "accuracy": 0.9999305555555555
+    },
+    "laptop": {
+      "name": "Laptop",
+      "support": 5583,
+      "base_rate": 0.3877083333333333,
+      "threshold": 0.4099999964237213,
+      "precision": 0.844302043643921,
+      "recall": 0.8731864588930682,
+      "f1": 0.8585013647970414,
+      "accuracy": 0.8884027777777778
+    },
+    "mobile_charger": {
+      "name": "Mobile Charger",
+      "support": 5650,
+      "base_rate": 0.3923611111111111,
+      "threshold": 0.6499999761581421,
+      "precision": 0.8779016633156644,
+      "recall": 0.8500884955752213,
+      "f1": 0.8637712435932021,
+      "accuracy": 0.8947916666666667
+    },
+    "microwave": {
+      "name": "Microwave Oven",
+      "support": 4488,
+      "base_rate": 0.31166666666666665,
+      "threshold": 0.8299999833106995,
+      "precision": 0.999777183600713,
+      "recall": 0.999777183600713,
+      "f1": 0.999777183600713,
+      "accuracy": 0.9998611111111111
+    },
+    "induction_stove": {
+      "name": "Induction Stove",
+      "support": 4452,
+      "base_rate": 0.30916666666666665,
+      "threshold": 0.05000000074505806,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0
+    }
+  },
+  "macro_f1": 0.9132061777020897,
+  "micro_f1": 0.9099516800268134,
+  "micro_precision": 0.8902460685056905,
+  "micro_recall": 0.9305494066065895,
+  "hamming_accuracy": 0.9253703703703704,
+  "exact_match_accuracy": 0.48854166666666665,
+  "backend_agreement": {
+    "keras_vs_numpy_max_abs": 8.344650268554688e-06,
+    "keras_vs_numpy_mean_abs": 1.4244695023535314e-07,
+    "keras_vs_tflite_max_abs": 0.008422821760177612,
+    "tflite_vs_numpy_max_abs": 0.008422642946243286
+  },
+  "metrics": {
+    "macro_f1": 0.9132061777020897,
+    "micro_f1": 0.9099516800268134,
+    "hamming_accuracy": 0.9253703703703704,
+    "exact_match_accuracy": 0.48854166666666665,
+    "training_seconds": 443.9457356999628,
+    "training_windows": 72000,
+    "epochs_run": 18
+  }
+}

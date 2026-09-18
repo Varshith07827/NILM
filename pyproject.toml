@@ -1,0 +1,25 @@
+[project]
+name = "edge-ai-nilm"
+version = "1.0.0"
+description = "Edge AI-Based Non-Intrusive Load Monitoring for Low-Cost Smart Metering"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+]
+
+[tool.ruff]
+line-length = 90
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ai", "backend", "simulator"]

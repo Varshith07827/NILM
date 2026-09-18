@@ -1,0 +1,184 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 5%;
+    --foreground: 210 40% 96%;
+
+    --card: 222 44% 8%;
+    --card-foreground: 210 40% 96%;
+
+    --popover: 222 46% 7%;
+    --popover-foreground: 210 40% 96%;
+
+    --primary: 190 95% 50%;
+    --primary-foreground: 222 47% 6%;
+
+    --secondary: 217 33% 15%;
+    --secondary-foreground: 210 40% 96%;
+
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20% 62%;
+
+    --accent: 262 83% 66%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 72% 56%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 152 66% 45%;
+    --success-foreground: 222 47% 6%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 222 47% 6%;
+
+    --border: 217 33% 18%;
+    --input: 217 33% 18%;
+    --ring: 190 95% 50%;
+
+    --radius: 0.85rem;
+  }
+
+  .light {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 192 91% 36%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 94%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 94%;
+    --muted-foreground: 215 16% 42%;
+
+    --accent: 262 83% 58%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 60% 34%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 32 92% 44%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 214 32% 88%;
+    --input: 214 32% 88%;
+    --ring: 192 91% 36%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply bg-background;
+  }
+
+  /* The ambient field behind the whole dashboard. Two very soft radial
+     gradients give the glass panels something to actually refract, which is
+     what stops "glassmorphism" from just looking like grey boxes.
+     Painted directly on the body with `background-attachment: fixed` rather
+     than as a `position: fixed` pseudo-element: a fixed layer underneath
+     `backdrop-filter` panels creates a separate compositing layer that some
+     renderers mis-composite while scrolling. */
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background-image:
+      radial-gradient(
+        50rem 50rem at 12% -10%,
+        hsl(var(--primary) / 0.16),
+        transparent 60%
+      ),
+      radial-gradient(
+        45rem 45rem at 88% 8%,
+        hsl(var(--accent) / 0.14),
+        transparent 62%
+      ),
+      radial-gradient(
+        60rem 40rem at 50% 110%,
+        hsl(190 95% 50% / 0.08),
+        transparent 65%
+      );
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
+
+@layer components {
+  /* Frosted panel used by every card on the dashboard. */
+  .glass {
+    @apply border border-white/[0.07] bg-card/60 backdrop-blur-xl;
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.05),
+      0 1px 2px rgb(0 0 0 / 0.3),
+      0 16px 40px -24px rgb(0 0 0 / 0.8);
+  }
+
+  .light .glass {
+    @apply border-black/[0.06] bg-white/80;
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.9),
+      0 1px 2px rgb(15 23 42 / 0.06),
+      0 12px 32px -20px rgb(15 23 42 / 0.25);
+  }
+
+  .stat-value {
+    @apply font-mono text-3xl font-semibold tabular-nums tracking-tight;
+  }
+
+  .label-muted {
+    @apply text-[0.7rem] font-medium uppercase tracking-[0.14em] text-muted-foreground;
+  }
+
+  /* A live element that should read as "this number is moving". */
+  .live-dot {
+    @apply relative inline-flex h-2 w-2 rounded-full bg-success;
+  }
+  .live-dot::after {
+    content: "";
+    @apply absolute inset-0 rounded-full bg-success;
+    animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-br from-primary via-primary to-accent bg-clip-text text-transparent;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
