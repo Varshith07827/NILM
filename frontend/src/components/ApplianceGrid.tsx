@@ -1,5 +1,6 @@
 import { Check, Power, X } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -125,9 +126,12 @@ export function ApplianceGrid({
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <p className="truncate text-xs font-semibold">
+                      <Link
+                        to={`/appliances/${encodeURIComponent(appliance.id)}`}
+                        className="truncate text-xs font-semibold hover:text-primary hover:underline"
+                      >
                         {appliance.name}
-                      </p>
+                      </Link>
                       {showTruth ? (
                         <InfoTip
                           label={
@@ -156,6 +160,9 @@ export function ApplianceGrid({
                       ) : null}
                     </div>
 
+                    <p className="truncate text-[0.62rem] text-muted-foreground">
+                      {appliance.room_name} · {appliance.rated_power_w} W rated
+                    </p>
                     <div className="mt-0.5 flex items-baseline gap-1">
                       <span className="font-mono text-base font-semibold tabular-nums">
                         {formatPower(appliance.estimated_power_w).value}

@@ -15,9 +15,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.app.api.routes import cost, history, live, reports, simulation, ws
-from backend.app.core.config import get_settings
-from backend.app.db.session import init_database
+from backend.app.api.routes import (
+    auth,
+    cost,
+    history,
+    house,
+    live,
+    notifications,
+    reports,
+    simulation,
+    ws,
+)
+from backend.app.core.config import Settings, get_settings
+from backend.app.db.session import init_database, session_scope
+from backend.app.services import house_config
+from backend.app.services.accounts import admin_exists, bootstrap_admin
+from backend.app.services.cost import Tariff
 from backend.app.services.pipeline import NILMPipeline
 
 logging.basicConfig(
@@ -30,14 +43,42 @@ logger = logging.getLogger("nilm")
 settings = get_settings()
 
 
+def _load_saved_state(settings: Settings) -> tuple[house_config.HouseConfig, dict, dict]:
+    """Seed first-run data and read back everything the admin has saved."""
+    with session_scope() as session:
+        if house_config.seed_if_empty(session):
+            logger.info("seeded the default house (a ceiling fan in every room)")
+        if bootstrap_admin(session, settings):
+            logger.info("admin account %r created from NILM_ADMIN_PASSWORD", settings.admin_username)
+        elif not admin_exists(session):
+            logger.warning(
+                "no admin account yet -- create one with: "
+                "python -m backend.manage set-admin-password"
+            )
+        config = house_config.load_house(session)
+        tariff = house_config.get_setting(session, cost.TARIFF_SETTING) or {}
+        alerts = house_config.get_setting(session, cost.ALERTS_SETTING) or {}
+    return config, tariff, alerts
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create the database and the pipeline, and tear them down cleanly."""
     init_database()
     logger.info("database ready at %s", settings.database_path)
+    config, saved_tariff, saved_alerts = _load_saved_state(settings)
 
-    pipeline = NILMPipeline(settings)
+    pipeline = NILMPipeline(settings, devices=config.devices, rooms=config.rooms)
+    if saved_tariff:
+        pipeline.set_tariff(Tariff.from_dict(saved_tariff))
+    for key, value in saved_alerts.items():
+        if hasattr(pipeline.notifier, key):
+            setattr(pipeline.notifier, key, value)
+            setattr(settings, key, value)
     app.state.pipeline = pipeline
+    logger.info(
+        "house: %d rooms, %d devices", len(config.rooms), len(config.devices)
+    )
 
     info = pipeline.engine.info()
     if info["model_available"]:
@@ -95,6 +136,9 @@ app.include_router(simulation.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 app.include_router(cost.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(house.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
 app.include_router(ws.router)
 
 

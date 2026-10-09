@@ -46,24 +46,58 @@ export interface CostBlock {
   currency_symbol: string;
 }
 
+/**
+ * One *device* — a concrete appliance in a room. Several devices can share a
+ * catalogue type (a ceiling fan in every room); the classifier only knows
+ * types, so `probability`, `threshold` and `type_detected` are the type's.
+ */
 export interface ApplianceFrame {
   id: string;
+  type_id: string;
+  type_name: string;
   name: string;
+  room_id: string;
+  room_name: string;
   icon: string;
   category: string;
   colour: string;
   rated_power_w: number;
+  power_factor: number;
   probability: number;
   threshold: number;
+  type_detected: boolean;
+  /** This device is estimated to be running. */
   detected: boolean;
   estimated_power_w: number;
+  /** Derived from the attributed power and the device's power factor. */
+  estimated_current_a: number;
   /** Ground truth from the simulator. The model never sees this. */
   actual_power_w: number;
+  actual_current_a: number;
   actually_on: boolean;
   socket_on: boolean;
   energy_wh_today: number;
   cost_today_inr: number;
+  cost_month_inr: number;
   runtime_s_today: number;
+}
+
+/** Classifier output for one catalogue type. */
+export interface TypeFrame {
+  id: string;
+  name: string;
+  icon: string;
+  colour: string;
+  probability: number;
+  threshold: number;
+  detected: boolean;
+  actually_on: boolean;
+  device_count: number;
+}
+
+export interface RoomRef {
+  id: string;
+  name: string;
 }
 
 export type EventAction = "on" | "off";
@@ -133,6 +167,8 @@ export interface LiveFrame {
   energy: EnergyBlock;
   cost: CostBlock;
   appliances: ApplianceFrame[];
+  types: TypeFrame[];
+  rooms: RoomRef[];
   detected: string[];
   unattributed_w: number;
   residual_a: number;
@@ -334,3 +370,75 @@ export type SocketMessage =
       data: { frames: LiveFrame[]; alerts: Alert[]; events: ApplianceEvent[] };
     }
   | { type: "pong" };
+
+// --------------------------------------------------------------------------- //
+// House configuration, admin, notifications
+// --------------------------------------------------------------------------- //
+
+export interface HouseRoom {
+  id: string;
+  name: string;
+  device_ids: string[];
+}
+
+export interface HouseDevice {
+  id: string;
+  type_id: string;
+  room_id: string;
+  name: string;
+  rated_power_w: number;
+  catalogue_power_w: number;
+  custom_rating: boolean;
+  power_factor: number;
+}
+
+export interface HouseType {
+  id: string;
+  name: string;
+  icon: string;
+  category: string;
+  colour: string;
+  rated_power_w: number;
+  min_power_w: number;
+  max_power_w: number;
+  device_count: number;
+  max_devices: number;
+}
+
+export interface HouseConfig {
+  rooms: HouseRoom[];
+  devices: HouseDevice[];
+  types: HouseType[];
+}
+
+export interface NotificationItem {
+  id: number;
+  sim_time: string;
+  recorded_at: string;
+  level: AlertLevel;
+  category: string;
+  title: string;
+  message: string;
+  value: number;
+  read: boolean;
+}
+
+export interface NotificationPage {
+  items: NotificationItem[];
+  total: number;
+  unread: number;
+}
+
+export interface DeviceHistory {
+  device_id: string;
+  name: string;
+  points: { sim_time: string; power_w: number; current_a: number }[];
+  hourly: { bucket_start: string; energy_wh: number; cost_inr: number }[];
+}
+
+export interface AlertSettings {
+  high_power_threshold_w: number;
+  daily_cost_alert_inr: number;
+  peak_current_alert_a: number;
+  sanctioned_load_w: number;
+}

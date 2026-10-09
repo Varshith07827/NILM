@@ -31,7 +31,9 @@ async def get_report(
     # before we aggregate over it, or the report silently omits the last few
     # seconds of the run.
     await pipeline.flush()
-    report = build_report(session, pipeline.run_id, period, pipeline.tariff)
+    report = build_report(
+        session, pipeline.run_id, period, pipeline.tariff, specs=pipeline.house.specs
+    )
 
     if fmt == "json":
         return report

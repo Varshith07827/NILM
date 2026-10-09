@@ -1,14 +1,12 @@
-import { Cpu } from "lucide-react";
+import { History } from "lucide-react";
 import { useMemo } from "react";
 
-import { AccuracyPanel } from "@/components/AccuracyPanel";
 import { EventTimeline } from "@/components/EventTimeline";
-import { NotificationPanel } from "@/components/NotificationPanel";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useLive } from "@/state/live";
 
-export default function Diagnostics() {
-  const { frame, status, alerts, events } = useLive();
+export default function EventsPage() {
+  const { frame, events } = useLive();
 
   const applianceIcons = useMemo(() => {
     const map: Record<string, { icon: string; colour: string }> = {};
@@ -21,14 +19,11 @@ export default function Diagnostics() {
   return (
     <div className="space-y-4">
       <PageHeader
-        icon={Cpu}
-        title="Diagnostics"
-        description="How well the detector is doing right now, what it is running on, and everything that has happened in the house."
+        icon={History}
+        title="Events"
+        description="Every switch-on and switch-off in the house, and whether the detector picked it up."
       />
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <AccuracyPanel frame={frame} model={status?.model ?? null} />
-        <NotificationPanel alerts={alerts} />
+      <div className="max-w-3xl">
         <EventTimeline events={events} applianceIcons={applianceIcons} />
       </div>
     </div>

@@ -184,6 +184,25 @@ Verified automatically at export time by `ai/export.py::verify_export`:
    sequence, so a compressor restarting takes a couple of seconds to register.
    Measured mean detection latency is ~0.5 s in the live pipeline.
 5. **Fixed catalogue.** New appliances require retraining.
+6. **One device per type in training.** The house can now hold up to five
+   devices of a type (a ceiling fan in every room), each with a slightly
+   phase-shifted signature so they stay physically separable. The classifier
+   was not retrained for this. Measured with `python -m ai.evaluate_devices`
+   (3,000 windows per scenario, default house with five fans):
+
+   | Scenario | Type-level F1, catalogue house | Type-level F1, five fans | Right fan, five fans |
+   |---|---|---|---|
+   | Evening | 0.974 | 0.963 | 80% |
+   | Afternoon | 0.915 | 0.830 | 69% |
+   | Night | 0.977 | 0.842 | 79% |
+   | Fan shuffle (one fan toggled every 45 s, fridge, TV and microwave running) | 0.934 | 0.765 | 77% |
+
+   The main failure: with four or five fans on together, the model reads 300+ W
+   of induction-motor load partly as a refrigerator compressor. With *perfect*
+   type detection substituted for the classifier, the switching-event tracker
+   picks the right fan in 98.5% of night windows and 82% of fan-shuffle
+   windows -- so most of the gap is the classifier, and retraining on houses
+   with several devices per type and varied ratings is the fix.
 
 ### A resolved failure mode, documented
 

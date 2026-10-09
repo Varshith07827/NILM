@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
-from backend.app.api.deps import PipelineDep
+from backend.app.api.deps import AdminDep, PipelineDep
+from backend.app.db.session import session_scope
 from backend.app.schemas.api import (
     AlertSettingsRequest,
     MessageResponse,
@@ -12,6 +15,16 @@ from backend.app.schemas.api import (
     TariffRequest,
 )
 from backend.app.services.cost import TARIFF_PRESETS, Tariff, TariffSlab, get_tariff
+from backend.app.services.house_config import set_setting
+
+#: Keys under which admin changes are persisted in ``app_settings``.
+TARIFF_SETTING = "tariff"
+ALERTS_SETTING = "alerts"
+
+
+def _persist(key: str, value: dict) -> None:
+    with session_scope() as session:
+        set_setting(session, key, value)
 
 router = APIRouter(tags=["cost"])
 
@@ -53,8 +66,13 @@ def get_tariffs() -> list[TariffOut]:
 
 
 @router.post("/settings/tariff", response_model=MessageResponse)
-def set_tariff(request: TariffRequest, pipeline: PipelineDep) -> MessageResponse:
-    """Select a preset tariff, or install a fully custom slab structure."""
+async def set_tariff(
+    request: TariffRequest, pipeline: PipelineDep, _: AdminDep
+) -> MessageResponse:
+    """Select a preset tariff, or install a fully custom slab structure.
+
+    Admin only. The choice is saved and restored on the next start.
+    """
     if request.tariff_id and not request.slabs:
         try:
             tariff = get_tariff(request.tariff_id)
@@ -76,6 +94,7 @@ def set_tariff(request: TariffRequest, pipeline: PipelineDep) -> MessageResponse
             status_code=400, detail="supply either tariff_id or a list of slabs"
         )
 
+    await asyncio.to_thread(_persist, TARIFF_SETTING, tariff.to_dict())
     pipeline.set_tariff(tariff)
     return MessageResponse(
         message=f"tariff set to {tariff.name}", detail={"tariff": tariff.to_dict()}
@@ -83,10 +102,13 @@ def set_tariff(request: TariffRequest, pipeline: PipelineDep) -> MessageResponse
 
 
 @router.post("/settings/alerts", response_model=MessageResponse)
-def set_alert_settings(
-    request: AlertSettingsRequest, pipeline: PipelineDep
+async def set_alert_settings(
+    request: AlertSettingsRequest, pipeline: PipelineDep, _: AdminDep
 ) -> MessageResponse:
-    """Adjust the alert thresholds without restarting the simulation."""
+    """Adjust the alert thresholds without restarting the simulation.
+
+    Admin only. Saved and restored on the next start.
+    """
     notifier = pipeline.notifier
     settings = pipeline.settings
 
@@ -103,15 +125,14 @@ def set_alert_settings(
         notifier.sanctioned_load_w = request.sanctioned_load_w
         settings.sanctioned_load_w = request.sanctioned_load_w
 
-    return MessageResponse(
-        message="alert thresholds updated",
-        detail={
-            "high_power_threshold_w": notifier.high_power_threshold_w,
-            "daily_cost_alert_inr": notifier.daily_cost_alert_inr,
-            "peak_current_alert_a": notifier.peak_current_alert_a,
-            "sanctioned_load_w": notifier.sanctioned_load_w,
-        },
-    )
+    thresholds = {
+        "high_power_threshold_w": notifier.high_power_threshold_w,
+        "daily_cost_alert_inr": notifier.daily_cost_alert_inr,
+        "peak_current_alert_a": notifier.peak_current_alert_a,
+        "sanctioned_load_w": notifier.sanctioned_load_w,
+    }
+    await asyncio.to_thread(_persist, ALERTS_SETTING, thresholds)
+    return MessageResponse(message="alert thresholds updated", detail=thresholds)
 
 
 @router.get("/settings", summary="Current settings")

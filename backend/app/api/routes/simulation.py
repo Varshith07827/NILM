@@ -14,7 +14,6 @@ from backend.app.schemas.api import (
     ScenarioRequest,
     SpeedRequest,
 )
-from simulator.appliances import APPLIANCES_BY_ID
 
 router = APIRouter(prefix="/simulation", tags=["simulation"])
 
@@ -95,12 +94,13 @@ async def toggle_appliance(
     request: ApplianceToggleRequest, pipeline: PipelineDep
 ) -> MessageResponse:
     """Manually switch an appliance, as if walking over to the wall socket."""
-    if request.appliance_id not in APPLIANCES_BY_ID:
+    spec = pipeline.house.specs.get(request.appliance_id)
+    if spec is None:
         raise HTTPException(
-            status_code=404, detail=f"unknown appliance {request.appliance_id!r}"
+            status_code=404, detail=f"unknown device {request.appliance_id!r}"
         )
     event = pipeline.set_appliance(request.appliance_id, request.on)
-    name = APPLIANCES_BY_ID[request.appliance_id].name
+    name = spec.name
     return MessageResponse(
         message=f"{name} switched {'on' if request.on else 'off'}",
         detail={"event": event},

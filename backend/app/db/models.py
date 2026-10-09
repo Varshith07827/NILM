@@ -142,3 +142,60 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(String(256))
     value: Mapped[float] = mapped_column(Float, default=0.0)
     run_id: Mapped[str] = mapped_column(String(36), index=True)
+    #: Whether someone has seen it in the notification centre.
+    read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+
+# --------------------------------------------------------------------------- #
+# Configuration
+# --------------------------------------------------------------------------- #
+
+
+class Room(Base):
+    """A room of the house, as configured from the admin pages."""
+
+    __tablename__ = "rooms"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Device(Base):
+    """One appliance placed in a room. See :mod:`simulator.devices`."""
+
+    __tablename__ = "devices"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    type_id: Mapped[str] = mapped_column(String(32), index=True)
+    room_id: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    #: Signature variant within the type; unique per type.
+    variant: Mapped[int] = mapped_column(Integer, default=0)
+    #: ``None`` means the catalogue rating.
+    rated_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("type_id", "variant", name="uq_device_variant"),
+    )
+
+
+class AdminUser(Base):
+    """An account allowed to change the house, the tariff and ratings."""
+
+    __tablename__ = "admin_users"
+
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    #: ``pbkdf2_sha256$iterations$salt$hash`` -- never the password itself.
+    password_hash: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AppSetting(Base):
+    """Small persisted settings, e.g. the admin-edited tariff."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON)

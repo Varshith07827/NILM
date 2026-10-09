@@ -16,6 +16,7 @@ frontend/.vite/
 database/*.db
 database/*.db-wal
 database/*.db-shm
+database/.secret_key
 database/recordings/*.jsonl
 reports/nilm-*.csv
 reports/nilm-*.pdf

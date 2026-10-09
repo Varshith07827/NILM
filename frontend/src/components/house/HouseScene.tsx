@@ -2,10 +2,10 @@
  * The 3-D house.
  *
  * An isometric cutaway of the simulated household, driven entirely by the live
- * pipeline frame. Appliances are clickable — that replaces the old toggle
- * switches — and they *show* their state physically rather than through a
- * label: fan blades spin faster under load, the induction hob glows and pulses,
- * the tube light actually lights the kitchen.
+ * pipeline frame and the configured rooms. Clicking a device selects it, and
+ * the page beside the scene shows its usage and cost. Devices *show* their
+ * state physically rather than through a label: fan blades spin faster under
+ * load, the induction hob glows and pulses, the tube light lights the room.
  *
  * Scene lighting follows the simulated clock. Running the Night scenario
  * genuinely darkens the house, so the only illumination left comes from
@@ -25,14 +25,11 @@ import {
 } from "@/components/house/ApplianceModels";
 import {
   CEILING_HEIGHT,
-  FURNITURE,
-  PLACEMENTS,
-  ROOMS,
-  ROOM_OF_APPLIANCE,
   WALL_HEIGHT,
   WALL_THICKNESS,
   daylight,
   type FurnitureSpec,
+  type HouseLayout,
   type RoomSpec,
 } from "@/components/house/layout";
 import { formatPower } from "@/lib/utils";
@@ -146,25 +143,26 @@ interface ApplianceNodeProps {
   appliance: ApplianceFrame;
   position: [number, number, number];
   rotation: number;
+  /** Ceiling-mounted: the model hangs around its origin rather than above it. */
+  ceiling: boolean;
   showTruth: boolean;
   selected: boolean;
   onSelect: (id: string) => void;
-  onToggle: (appliance: ApplianceFrame) => void;
 }
 
 function ApplianceNode({
   appliance,
   position,
   rotation,
+  ceiling,
   showTruth,
   selected,
   onSelect,
-  onToggle,
 }: ApplianceNodeProps) {
   const [hovered, setHovered] = useState(false);
   const group = useRef<THREE.Group>(null);
 
-  const Model = applianceModel(appliance.id);
+  const Model = applianceModel(appliance.type_id);
   const modelProps: ModelProps = {
     active: appliance.detected,
     power: appliance.estimated_power_w,
@@ -177,7 +175,8 @@ function ApplianceNode({
   const missed = showTruth && appliance.actually_on && !appliance.detected;
   const falsePositive = showTruth && !appliance.actually_on && appliance.detected;
 
-  const labelHeight = (MODEL_HEIGHT[appliance.id] ?? 0.5) + 0.45;
+  const labelHeight = (MODEL_HEIGHT[appliance.type_id] ?? 0.5) + 0.45;
+  const hitHeight = Math.max(0.5, (MODEL_HEIGHT[appliance.type_id] ?? 0.5) + 0.2);
 
   useFrame((state) => {
     if (!group.current) return;
@@ -219,7 +218,6 @@ function ApplianceNode({
         onClick={(event) => {
           event.stopPropagation();
           onSelect(appliance.id);
-          onToggle(appliance);
         }}
         onPointerOver={(event) => {
           event.stopPropagation();
@@ -232,6 +230,12 @@ function ApplianceNode({
         }}
       >
         <Model {...modelProps} />
+        {/* Invisible, generous click target: fan blades and a phone charger
+            are too thin to hit reliably on their own. */}
+        <mesh position={[0, ceiling ? 0 : hitHeight / 2, 0]}>
+          <boxGeometry args={[0.95, hitHeight, 0.95]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
       </group>
 
       {/* Floating label. Shown for anything running, anything the detector got
@@ -352,17 +356,23 @@ function SceneLighting({ hour }: { hour: number }) {
 
 interface HouseSceneProps {
   appliances: ApplianceFrame[];
+  layout: HouseLayout;
   /** Hour of the simulated day, drives the lighting. */
   hour: number;
   showTruth: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onToggle: (appliance: ApplianceFrame) => void;
   cameraPosition: [number, number, number];
 }
 
 /** Smoothly flies the camera to a new preset instead of snapping. */
-function CameraRig({ target }: { target: [number, number, number] }) {
+function CameraRig({
+  target,
+  lookAt,
+}: {
+  target: [number, number, number];
+  lookAt: [number, number, number];
+}) {
   const desired = useRef(new THREE.Vector3(...target));
   desired.current.set(...target);
 
@@ -371,7 +381,7 @@ function CameraRig({ target }: { target: [number, number, number] }) {
     // the user's own orbiting is never fought by this rig.
     if (state.camera.position.distanceTo(desired.current) > 0.05) {
       state.camera.position.lerp(desired.current, 0.06);
-      state.camera.lookAt(-0.5, 0.6, -1);
+      state.camera.lookAt(...lookAt);
     }
   });
   return null;
@@ -379,11 +389,11 @@ function CameraRig({ target }: { target: [number, number, number] }) {
 
 function SceneContents({
   appliances,
+  layout,
   hour,
   showTruth,
   selectedId,
   onSelect,
-  onToggle,
 }: Omit<HouseSceneProps, "cameraPosition">) {
   const byId = useMemo(
     () => Object.fromEntries(appliances.map((a) => [a.id, a])),
@@ -392,15 +402,15 @@ function SceneContents({
 
   const roomWatts = useMemo(() => {
     const totals: Record<string, number> = {};
-    for (const room of ROOMS) totals[room.id] = 0;
+    for (const room of layout.rooms) totals[room.id] = 0;
     for (const appliance of appliances) {
-      const roomId = ROOM_OF_APPLIANCE[appliance.id];
-      if (roomId && appliance.detected) {
-        totals[roomId] = (totals[roomId] ?? 0) + appliance.estimated_power_w;
+      if (appliance.detected) {
+        totals[appliance.room_id] =
+          (totals[appliance.room_id] ?? 0) + appliance.estimated_power_w;
       }
     }
     return totals;
-  }, [appliances]);
+  }, [appliances, layout.rooms]);
 
   const busiestRoom = useMemo(() => {
     let best: string | null = null;
@@ -419,20 +429,24 @@ function SceneContents({
       <SceneLighting hour={hour} />
 
       {/* ground plane the house sits on */}
-      <mesh position={[-0.5, -0.02, -1]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[34, 34]} />
+      <mesh
+        position={[layout.centre[0], -0.02, layout.centre[2]]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[layout.radius * 2 + 23, layout.radius * 2 + 23]} />
         <meshStandardMaterial color="#070b13" roughness={1} />
       </mesh>
 
-      {ROOMS.map((room) => (
+      {layout.rooms.map((room) => (
         <Room key={room.id} room={room} highlight={busiestRoom === room.id} />
       ))}
 
-      {FURNITURE.map((item, index) => (
+      {layout.furniture.map((item, index) => (
         <Furniture key={index} item={item} />
       ))}
 
-      {PLACEMENTS.map((placement) => {
+      {layout.placements.map((placement) => {
         const appliance = byId[placement.id];
         if (!appliance) return null;
         return (
@@ -441,15 +455,15 @@ function SceneContents({
             appliance={appliance}
             position={placement.position}
             rotation={placement.rotation ?? 0}
+            ceiling={Boolean(placement.ceiling)}
             showTruth={showTruth}
             selected={selectedId === placement.id}
             onSelect={onSelect}
-            onToggle={onToggle}
           />
         );
       })}
 
-      {ROOMS.map((room) => (
+      {layout.rooms.map((room) => (
         <RoomLabel key={room.id} room={room} watts={roomWatts[room.id] ?? 0} />
       ))}
     </>
@@ -476,13 +490,13 @@ export function HouseScene(props: HouseSceneProps) {
       <Suspense fallback={null}>
         <SceneContents {...props} />
       </Suspense>
-      <CameraRig target={props.cameraPosition} />
+      <CameraRig target={props.cameraPosition} lookAt={props.layout.centre} />
       <OrbitControls
         makeDefault
-        target={[-0.5, 0.6, -1]}
+        target={props.layout.centre}
         enablePan
         minDistance={6}
-        maxDistance={34}
+        maxDistance={34 * Math.max(1, props.layout.radius / 5.5)}
         // Keep the camera above the floor plane; orbiting underneath the house
         // shows the underside of the ground and looks broken.
         maxPolarAngle={Math.PI / 2.15}

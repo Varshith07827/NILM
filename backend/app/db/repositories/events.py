@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.db.models import ApplianceEvent, Notification
@@ -73,6 +73,30 @@ class NotificationRepository:
             .limit(limit)
         )
         return list(self.session.execute(statement).scalars())
+
+    def page(
+        self, limit: int = 50, offset: int = 0, unread_only: bool = False
+    ) -> list[Notification]:
+        """Across every run, newest first: the notification centre keeps them."""
+        statement = select(Notification).order_by(Notification.id.desc())
+        if unread_only:
+            statement = statement.where(Notification.read.is_(False))
+        return list(
+            self.session.execute(statement.limit(limit).offset(offset)).scalars()
+        )
+
+    def count(self, unread_only: bool = False) -> int:
+        statement = select(func.count()).select_from(Notification)
+        if unread_only:
+            statement = statement.where(Notification.read.is_(False))
+        return int(self.session.execute(statement).scalar_one())
+
+    def mark_read(self, ids: list[int] | None = None) -> int:
+        """Mark the given notifications read, or all of them when ``ids`` is None."""
+        statement = update(Notification).where(Notification.read.is_(False))
+        if ids is not None:
+            statement = statement.where(Notification.id.in_(ids))
+        return int(self.session.execute(statement.values(read=True)).rowcount or 0)
 
     def delete_run(self, run_id: str) -> int:
         return int(

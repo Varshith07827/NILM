@@ -114,6 +114,19 @@ class ApplianceSpec:
     #: Probability the appliance is in use during each hour of the day.
     hourly_probability: tuple[float, ...] = tuple([0.1] * 24)
     colour: str = "#38bdf8"
+    #: Catalogue type this spec is an instance of. Empty for the catalogue
+    #: entries themselves, whose ``id`` *is* the type; set on the per-device
+    #: specs built by :mod:`simulator.devices`.
+    type_id: str = ""
+    #: Signature variant within the type: 0 is the catalogue signature, 1.. are
+    #: perturbed signatures that keep same-type devices separable (see
+    #: :func:`simulator.devices.variant_spec`). Internal only, never displayed.
+    variant: int = 0
+
+    @property
+    def kind(self) -> str:
+        """The catalogue type -- what the classifier is able to recognise."""
+        return self.type_id or self.id
 
     # ------------------------------------------------------------------ #
     # Derived electrical quantities

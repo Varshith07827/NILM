@@ -1,8 +1,7 @@
-import { BarChart3, Radar } from "lucide-react";
+import { Radar, Waves } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
 
-import { LiveCharts } from "@/components/LiveCharts";
 import { Oscilloscope } from "@/components/Oscilloscope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -26,7 +25,7 @@ interface SignatureRow {
 }
 
 export default function Analytics() {
-  const { frame, history } = useLive();
+  const { frame } = useLive();
   const [signatures, setSignatures] = useState<SignatureRow[]>([]);
   const [orders, setOrders] = useState<number[]>([1, 3, 5, 7, 9, 11, 13]);
   const [selected, setSelected] = useState<string>("tv");
@@ -72,9 +71,9 @@ export default function Analytics() {
   return (
     <div className="space-y-4">
       <PageHeader
-        icon={BarChart3}
-        title="Analytics"
-        description="The raw signal and the frequency-domain structure the classifier keys on."
+        icon={Waves}
+        title="Waveform & Harmonics"
+        description="The raw mains signal and the frequency-domain structure the classifier keys on."
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -128,7 +127,6 @@ export default function Analytics() {
         </Card>
       </div>
 
-      <LiveCharts history={history} window={320} />
     </div>
   );
 }

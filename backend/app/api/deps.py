@@ -11,12 +11,16 @@ from __future__ import annotations
 
 from typing import Annotated, Iterator
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import Settings, get_settings
+from backend.app.core.security import TokenClaims, verify_token
 from backend.app.db.session import SessionFactory
 from backend.app.services.pipeline import NILMPipeline
+
+_bearer = HTTPBearer(auto_error=False)
 
 
 def get_pipeline(request: Request) -> NILMPipeline:
@@ -36,6 +40,24 @@ def get_db() -> Iterator[Session]:
         session.close()
 
 
+def require_admin(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> TokenClaims:
+    """Reject the request unless it carries a valid admin token."""
+    claims = (
+        verify_token(credentials.credentials, settings) if credentials else None
+    )
+    if claims is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="admin login required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return claims
+
+
 PipelineDep = Annotated[NILMPipeline, Depends(get_pipeline)]
 SessionDep = Annotated[Session, Depends(get_db)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+AdminDep = Annotated[TokenClaims, Depends(require_admin)]
