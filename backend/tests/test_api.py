@@ -71,7 +71,9 @@ class TestLiveData:
         frame = client.get("/api/live").json()["frame"]
 
         assert {"measurement", "energy", "cost", "appliances", "scope"} <= set(frame)
-        assert len(frame["appliances"]) == len(APPLIANCE_IDS)
+        pipeline = client.app.state.pipeline
+        assert len(frame["appliances"]) == len(pipeline.house.states)
+        assert len(frame["types"]) == len(APPLIANCE_IDS)
         assert frame["measurement"]["voltage_v"] > 200.0
         assert frame["measurement"]["power_w"] >= 0.0
         assert 0.0 <= frame["measurement"]["power_factor"] <= 1.0
@@ -204,12 +206,12 @@ class TestCostAndSettings:
         assert body["marginal_rate_inr"] >= 0.0
         assert len(body["slab_breakdown"]) >= 1
 
-    def test_switching_to_a_preset_tariff(self, client):
-        response = client.post("/api/settings/tariff", json={"tariff_id": "flat_rate"})
+    def test_switching_to_a_preset_tariff(self, client, admin_headers):
+        response = client.post("/api/settings/tariff", json={"tariff_id": "flat_rate"}, headers=admin_headers)
         assert response.status_code == 200
         assert client.get("/api/cost").json()["tariff"]["id"] == "flat_rate"
 
-    def test_custom_tariff_is_accepted(self, client):
+    def test_custom_tariff_is_accepted(self, client, admin_headers):
         response = client.post(
             "/api/settings/tariff",
             json={
@@ -217,26 +219,32 @@ class TestCostAndSettings:
                 "fixed_charge_inr": 25.0,
                 "slabs": [{"up_to_kwh": 50, "rate_inr": 3.0}, {"rate_inr": 9.0}],
             },
+            headers=admin_headers,
         )
         assert response.status_code == 200
         assert client.get("/api/cost").json()["tariff"]["name"] == "Unit Test Tariff"
 
-    def test_descending_slabs_are_rejected(self, client):
+    def test_descending_slabs_are_rejected(self, client, admin_headers):
         response = client.post(
             "/api/settings/tariff",
             json={
                 "slabs": [{"up_to_kwh": 200, "rate_inr": 3.0},
                           {"up_to_kwh": 100, "rate_inr": 9.0}],
             },
+            headers=admin_headers,
         )
         assert response.status_code == 422
 
-    def test_an_empty_tariff_request_is_rejected(self, client):
-        assert client.post("/api/settings/tariff", json={}).status_code == 400
+    def test_an_empty_tariff_request_is_rejected(self, client, admin_headers):
+        assert client.post(
+            "/api/settings/tariff", json={}, headers=admin_headers
+        ).status_code == 400
 
-    def test_alert_thresholds_can_be_updated(self, client):
+    def test_alert_thresholds_can_be_updated(self, client, admin_headers):
         response = client.post(
-            "/api/settings/alerts", json={"high_power_threshold_w": 1234.0}
+            "/api/settings/alerts",
+            json={"high_power_threshold_w": 1234.0},
+            headers=admin_headers,
         )
         assert response.status_code == 200
         assert (
@@ -244,9 +252,11 @@ class TestCostAndSettings:
             == 1234.0
         )
 
-    def test_out_of_range_threshold_is_rejected(self, client):
+    def test_out_of_range_threshold_is_rejected(self, client, admin_headers):
         response = client.post(
-            "/api/settings/alerts", json={"sanctioned_load_w": -5.0}
+            "/api/settings/alerts",
+            json={"sanctioned_load_w": -5.0},
+            headers=admin_headers,
         )
         assert response.status_code == 422
 

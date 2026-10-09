@@ -13,11 +13,12 @@ alerting system embarrasses itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-from simulator.appliances import APPLIANCES_BY_ID
+from simulator.appliances import APPLIANCES_BY_ID, ApplianceSpec
 
 
 class AlertLevel(str, Enum):
@@ -67,6 +68,22 @@ class AlertContext:
     cost_today_inr: float
     energy_today_wh: float
     currency_symbol: str = "₹"
+    #: Device id -> spec, for per-device names. ``detected`` and the
+    #: newly-* lists are catalogue *types* (what the classifier reports);
+    #: ``appliance_power_w`` and ``appliance_runtime_s`` are keyed by device.
+    specs: Mapping[str, ApplianceSpec] = field(default_factory=dict)
+
+    def spec(self, appliance_id: str) -> ApplianceSpec | None:
+        return self.specs.get(appliance_id) or APPLIANCES_BY_ID.get(appliance_id)
+
+    def type_power_w(self, type_id: str) -> float | None:
+        """Total estimated power of every device of a type, if any is known."""
+        watts = [
+            w
+            for aid, w in self.appliance_power_w.items()
+            if (spec := self.spec(aid)) is not None and spec.kind == type_id
+        ]
+        return sum(watts) if watts else None
 
 
 class NotificationEngine:
@@ -218,7 +235,7 @@ class NotificationEngine:
             spec = APPLIANCES_BY_ID.get(appliance_id)
             if spec is None:
                 continue
-            watts = context.appliance_power_w.get(appliance_id, spec.rated_power_w)
+            watts = context.type_power_w(appliance_id) or spec.rated_power_w
             if spec.rated_power_w >= self.HEAVY_LOAD_W:
                 if self._ready(f"heavy_appliance_start", context.sim_seconds):
                     alerts.append(
@@ -255,10 +272,10 @@ class NotificationEngine:
         for appliance_id, runtime in context.appliance_runtime_s.items():
             if runtime < 6 * 3600.0:
                 continue
-            spec = APPLIANCES_BY_ID.get(appliance_id)
+            spec = context.spec(appliance_id)
             if spec is None or spec.duty is not None:
                 continue  # thermostatic loads are meant to run all day
-            if appliance_id not in context.detected:
+            if spec.kind not in context.detected:
                 continue
             if self._ready(f"long_running", context.sim_seconds):
                 alerts.append(

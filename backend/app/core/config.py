@@ -10,6 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -70,6 +71,18 @@ class Settings(BaseSettings):
     peak_current_alert_a: float = 25.0
     #: Sanctioned load of the connection, for the peak-load gauge.
     sanctioned_load_w: float = 5000.0
+
+    # --- admin ----------------------------------------------------------- #
+    #: Key that signs admin session tokens. Left unset, one is generated on
+    #: first start and kept in ``database/.secret_key``.
+    secret_key: SecretStr | None = None
+    #: Admin login lifetime.
+    token_ttl_hours: float = 12.0
+    #: Bootstrap only: if no admin account exists yet and both of these are
+    #: set, the account is created at startup. The usual way to create or
+    #: change the account is ``python -m backend.manage set-admin-password``.
+    admin_username: str = "admin"
+    admin_password: SecretStr | None = None
 
     @property
     def database_path(self) -> Path:

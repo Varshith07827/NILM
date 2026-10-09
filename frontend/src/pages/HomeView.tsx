@@ -1,4 +1,5 @@
 import {
+  ArrowUpRight,
   Box,
   Eye,
   EyeOff,
@@ -9,6 +10,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { Suspense, lazy, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,13 +20,21 @@ import { Switch } from "@/components/ui/switch";
 import { InfoTip } from "@/components/ui/tooltip";
 import { PageHeader } from "@/components/layout/PageHeader";
 import {
-  CAMERA_PRESETS,
-  ROOMS,
-  ROOM_OF_APPLIANCE,
+  CAMERA_PRESET_NAMES,
+  cameraPosition,
+  layoutHouse,
+  type CameraPreset,
 } from "@/components/house/layout";
 import { api } from "@/lib/api";
 import { applianceIcon } from "@/lib/icons";
-import { cn, formatDuration, formatEnergy, formatPower, percent } from "@/lib/utils";
+import {
+  cn,
+  formatCurrency,
+  formatDuration,
+  formatEnergy,
+  formatPower,
+  percent,
+} from "@/lib/utils";
 import { useLive } from "@/state/live";
 import type { ApplianceFrame } from "@/types";
 
@@ -39,23 +49,31 @@ const HouseScene = lazy(() =>
   })),
 );
 
-type PresetName = keyof typeof CAMERA_PRESETS;
-
-const PRESET_LABELS: Record<string, string> = {
+const PRESET_LABELS: Record<CameraPreset, string> = {
   isometric: "Isometric",
   front: "Front",
   top: "Top-down",
-  kitchen: "Kitchen",
-  living: "Living",
 };
 
 export default function HomeView() {
   const { frame, showTruth, setShowTruth, onChanged } = useLive();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [preset, setPreset] = useState<PresetName>("isometric");
+  const [preset, setPreset] = useState<CameraPreset>("isometric");
   const [busy, setBusy] = useState<string | null>(null);
 
   const appliances = frame?.appliances ?? [];
+  const rooms = frame?.rooms ?? [];
+
+  // Laid out again only when the house itself changes, not on every frame.
+  const layoutKey = JSON.stringify([
+    rooms,
+    appliances.map((a) => [a.id, a.type_id, a.room_id]),
+  ]);
+  const layout = useMemo(
+    () => layoutHouse(rooms, appliances),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layoutKey],
+  );
 
   /** Fractional hour of the simulated day, which drives the scene lighting. */
   const hour = useMemo(() => {
@@ -67,7 +85,7 @@ export default function HomeView() {
   const selected = appliances.find((a) => a.id === selectedId) ?? null;
 
   const roomTotals = useMemo(() => {
-    const totals = ROOMS.map((room) => ({
+    const totals = layout.rooms.map((room) => ({
       ...room,
       watts: 0,
       running: 0,
@@ -75,8 +93,7 @@ export default function HomeView() {
     }));
     const index = Object.fromEntries(totals.map((room) => [room.id, room]));
     for (const appliance of appliances) {
-      const roomId = ROOM_OF_APPLIANCE[appliance.id];
-      const room = roomId ? index[roomId] : undefined;
+      const room = index[appliance.room_id];
       if (!room) continue;
       room.appliances.push(appliance);
       if (appliance.detected) {
@@ -85,7 +102,7 @@ export default function HomeView() {
       }
     }
     return totals.sort((a, b) => b.watts - a.watts);
-  }, [appliances]);
+  }, [appliances, layout.rooms]);
 
   const toggle = async (appliance: ApplianceFrame) => {
     setBusy(appliance.id);
@@ -110,7 +127,7 @@ export default function HomeView() {
       <PageHeader
         icon={Home}
         title="3D Home"
-        description="The simulated household. Click any appliance to switch it at the socket — the detector has to work out what you did from the mains current alone."
+        description="The simulated household. Click any device to see its usage and cost; switch it from the inspector, and the detector has to work out what you did from the mains current alone."
         actions={
           <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/60 bg-secondary/40 px-3 py-1.5 text-[0.7rem] text-muted-foreground">
             {showTruth ? (
@@ -130,7 +147,7 @@ export default function HomeView() {
         {/* ------------------------------------------------------------ */}
         <Card className="relative overflow-hidden xl:col-span-8">
           <div className="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-1.5">
-            {(Object.keys(CAMERA_PRESETS) as PresetName[]).map((name) => (
+            {CAMERA_PRESET_NAMES.map((name) => (
               <Button
                 key={name}
                 size="sm"
@@ -138,7 +155,7 @@ export default function HomeView() {
                 className="h-7 px-2.5 text-[0.68rem] backdrop-blur-md"
                 onClick={() => setPreset(name)}
               >
-                {PRESET_LABELS[name] ?? name}
+                {PRESET_LABELS[name]}
               </Button>
             ))}
           </div>
@@ -163,7 +180,7 @@ export default function HomeView() {
 
           <div className="absolute bottom-3 left-4 z-10 flex items-center gap-1.5 rounded-md border border-border/50 bg-background/70 px-2 py-1 text-[0.64rem] text-muted-foreground backdrop-blur-md">
             <MousePointerClick className="h-3 w-3" />
-            Click an appliance to toggle · drag to orbit · scroll to zoom
+            Click a device to inspect · drag to orbit · scroll to zoom
           </div>
 
           <div className="h-[420px] w-full sm:h-[560px] xl:h-[640px]">
@@ -178,12 +195,12 @@ export default function HomeView() {
               {frame ? (
                 <HouseScene
                   appliances={appliances}
+                  layout={layout}
                   hour={hour}
                   showTruth={showTruth}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
-                  onToggle={(appliance) => void toggle(appliance)}
-                  cameraPosition={CAMERA_PRESETS[preset]}
+                  cameraPosition={cameraPosition(preset, layout)}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
@@ -223,10 +240,11 @@ export default function HomeView() {
                   showTruth={showTruth}
                   busy={busy === selected.id}
                   onToggle={() => void toggle(selected)}
+                  currencySymbol={frame?.cost.currency_symbol ?? "₹"}
                 />
               ) : (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  Select an appliance in the house to inspect it.
+                  Select a device in the house to see its usage and cost.
                 </p>
               )}
             </CardContent>
@@ -324,11 +342,13 @@ function ApplianceInspector({
   showTruth,
   busy,
   onToggle,
+  currencySymbol,
 }: {
   appliance: ApplianceFrame;
   showTruth: boolean;
   busy: boolean;
   onToggle: () => void;
+  currencySymbol: string;
 }) {
   const Icon = applianceIcon(appliance.icon);
   const estimated = formatPower(appliance.estimated_power_w);
@@ -352,7 +372,7 @@ function ApplianceInspector({
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[0.68rem] text-muted-foreground">
-            {appliance.category} · rated {appliance.rated_power_w} W
+            {appliance.room_name} · rated {appliance.rated_power_w} W
           </p>
           <div className="flex items-baseline gap-1">
             <span className="font-mono text-xl font-bold tabular-nums">
@@ -377,7 +397,9 @@ function ApplianceInspector({
       {/* confidence */}
       <div className="space-y-1">
         <div className="flex items-baseline justify-between text-[0.66rem]">
-          <span className="text-muted-foreground">Model confidence</span>
+          <span className="text-muted-foreground">
+            {appliance.type_name} confidence
+          </span>
           <span className="font-mono tabular-nums">
             {percent(appliance.probability, 0)}
           </span>
@@ -399,20 +421,30 @@ function ApplianceInspector({
           />
         </div>
         <p className="text-[0.62rem] text-muted-foreground">
-          Decision threshold {appliance.threshold.toFixed(2)}, tuned for this
-          appliance on validation data.
+          Decision threshold {appliance.threshold.toFixed(2)}. The classifier
+          recognises appliance <em>types</em>; which{" "}
+          {appliance.type_name.toLowerCase()} is running is worked out from its
+          switching signature.
         </p>
       </div>
 
       <Separator />
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[0.68rem]">
+        <Field
+          label="Current"
+          value={`${appliance.estimated_current_a.toFixed(3)} A`}
+        />
+        <Field label="Socket" value={appliance.socket_on ? "on" : "off"} />
         <Field label="Energy today" value={energyLabel(appliance.energy_wh_today)} />
         <Field label="Runtime today" value={formatDuration(appliance.runtime_s_today)} />
-        <Field label="Socket" value={appliance.socket_on ? "on" : "off"} />
         <Field
           label="Cost today"
-          value={`₹${appliance.cost_today_inr.toFixed(2)}`}
+          value={formatCurrency(appliance.cost_today_inr, currencySymbol)}
+        />
+        <Field
+          label="Cost this month"
+          value={formatCurrency(appliance.cost_month_inr, currencySymbol)}
         />
         {showTruth ? (
           <>
@@ -428,6 +460,13 @@ function ApplianceInspector({
           </>
         ) : null}
       </dl>
+
+      <Button asChild variant="outline" size="sm" className="w-full">
+        <Link to={`/appliances/${encodeURIComponent(appliance.id)}`}>
+          Usage history and cost
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
     </div>
   );
 }

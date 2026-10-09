@@ -15,6 +15,7 @@ Three output formats:
 from __future__ import annotations
 
 import csv
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -30,7 +31,7 @@ from backend.app.db.repositories.energy import (
     EnergyRepository,
 )
 from backend.app.services.cost import Tariff
-from simulator.appliances import APPLIANCES_BY_ID
+from simulator.appliances import APPLIANCES_BY_ID, ApplianceSpec
 
 ReportPeriod = Literal["daily", "weekly", "monthly"]
 
@@ -75,8 +76,14 @@ def build_report(
     run_id: str,
     period: ReportPeriod,
     tariff: Tariff,
+    specs: Mapping[str, ApplianceSpec] | None = None,
 ) -> dict:
-    """Assemble a structured report for the given period."""
+    """Assemble a structured report for the given period.
+
+    ``specs`` maps device ids to their specs so rows carry device names
+    ("Bedroom Ceiling Fan"); ids not found there fall back to the catalogue.
+    """
+    specs = specs or {}
     window = _resolve_window(session, run_id, period)
     energy_repo = EnergyRepository(session)
 
@@ -92,7 +99,7 @@ def build_report(
         appliance_id = row["appliance_id"]
         if appliance_id == TOTAL_KEY:
             continue
-        spec = APPLIANCES_BY_ID.get(appliance_id)
+        spec = specs.get(appliance_id) or APPLIANCES_BY_ID.get(appliance_id)
         appliances.append(
             {
                 "appliance_id": appliance_id,

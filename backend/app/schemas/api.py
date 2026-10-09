@@ -80,8 +80,11 @@ class TariffRequest(BaseModel):
         boundaries = [s.up_to_kwh for s in slabs]
         if any(b is None for b in boundaries[:-1]):
             raise ValueError("only the final slab may be open-ended")
+        if boundaries[-1] is not None:
+            # Otherwise units beyond the last boundary would be billed at zero.
+            raise ValueError("the final slab must be open-ended")
         finite = [b for b in boundaries if b is not None]
-        if finite != sorted(finite):
+        if finite != sorted(finite) or len(set(finite)) != len(finite):
             raise ValueError("slab boundaries must ascend")
         return slabs
 
@@ -206,3 +209,48 @@ class MessageResponse(BaseModel):
     ok: bool = True
     message: str = ""
     detail: dict[str, Any] | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Admin, house configuration, notifications
+# --------------------------------------------------------------------------- #
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+    expires_at: float
+
+
+class RoomRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=48)
+
+
+class DeviceCreateRequest(BaseModel):
+    type_id: str = Field(..., min_length=1, max_length=32)
+    room_id: str = Field(..., min_length=1, max_length=32)
+    name: str | None = Field(default=None, max_length=48)
+    rated_power_w: float | None = Field(default=None, gt=0, le=10_000)
+
+
+class DeviceUpdateRequest(BaseModel):
+    """Only the fields present are changed.
+
+    ``rated_power_w: null`` restores the catalogue rating; leaving the field
+    out keeps the current one.
+    """
+
+    name: str | None = Field(default=None, max_length=48)
+    room_id: str | None = Field(default=None, max_length=32)
+    rated_power_w: float | None = Field(default=None, gt=0, le=10_000)
+
+
+class NotificationReadRequest(BaseModel):
+    ids: list[int] | None = Field(
+        default=None, description="Notification ids to mark read; omit for all"
+    )

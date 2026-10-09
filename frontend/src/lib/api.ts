@@ -7,10 +7,14 @@
  */
 
 import type {
+  AlertSettings,
   ApplianceSpec,
   CostResponse,
+  DeviceHistory,
+  HouseConfig,
   LiveFrame,
   ModelInfo,
+  NotificationPage,
   RecordingSummary,
   Report,
   ScenarioInfo,
@@ -19,6 +23,22 @@ import type {
 } from "@/types";
 
 const BASE = "/api";
+
+/**
+ * The admin session token, set by the auth provider. Kept here rather than
+ * passed to every call so that admin-only requests carry it automatically.
+ */
+let authToken: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
+}
+
+/** Called when the server rejects the token, e.g. after it expired. */
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler;
+}
 
 export class ApiError extends Error {
   // Declared as a field rather than a constructor parameter property, because
@@ -33,10 +53,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const response = await fetch(`${BASE}${path}`, { headers, ...init });
+
+  if (response.status === 401 && authToken) onUnauthorized?.();
 
   if (!response.ok) {
     let detail = response.statusText;
@@ -55,16 +76,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-const post = <T>(path: string, body?: unknown) =>
-  request<T>(path, {
-    method: "POST",
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+const send =
+  (method: "POST" | "PATCH" | "DELETE") =>
+  <T>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
 
-interface MessageResponse {
+const post = send("POST");
+const patch = send("PATCH");
+const del = send("DELETE");
+
+export interface MessageResponse {
   ok: boolean;
   message: string;
-  detail?: unknown;
+  detail?: Record<string, unknown>;
 }
 
 export const api = {
@@ -120,7 +147,8 @@ export const api = {
     peak_current_alert_a?: number;
     sanctioned_load_w?: number;
   }) => post<MessageResponse>("/settings/alerts", body),
-  settings: () => request<Record<string, unknown>>("/settings"),
+  settings: () =>
+    request<{ tariff: Tariff; alerts: AlertSettings }>("/settings"),
 
   // --- reports ------------------------------------------------------------ #
   report: (period: "daily" | "weekly" | "monthly") =>
@@ -150,4 +178,48 @@ export const api = {
         detected: string[];
       }[];
     }>(`/history?max_points=${maxPoints}`),
+
+  // --- admin -------------------------------------------------------------- #
+  authStatus: () =>
+    request<{ admin_configured: boolean; setup_command: string }>("/auth/status"),
+  login: (username: string, password: string) =>
+    post<{ token: string; username: string; expires_at: number }>("/auth/login", {
+      username,
+      password,
+    }),
+  me: () => request<{ username: string; expires_at: number }>("/auth/me"),
+
+  // --- house configuration ------------------------------------------------ #
+  house: () => request<HouseConfig>("/house"),
+  addRoom: (name: string) => post<MessageResponse>("/house/rooms", { name }),
+  renameRoom: (roomId: string, name: string) =>
+    patch<MessageResponse>(`/house/rooms/${encodeURIComponent(roomId)}`, { name }),
+  deleteRoom: (roomId: string) =>
+    del<MessageResponse>(`/house/rooms/${encodeURIComponent(roomId)}`),
+  addDevice: (body: {
+    type_id: string;
+    room_id: string;
+    name?: string;
+    rated_power_w?: number;
+  }) => post<MessageResponse>("/house/devices", body),
+  /** `rated_power_w: null` restores the catalogue rating. */
+  updateDevice: (
+    deviceId: string,
+    body: { name?: string; room_id?: string; rated_power_w?: number | null },
+  ) => patch<MessageResponse>(`/house/devices/${encodeURIComponent(deviceId)}`, body),
+  deleteDevice: (deviceId: string) =>
+    del<MessageResponse>(`/house/devices/${encodeURIComponent(deviceId)}`),
+  deviceHistory: (deviceId: string, maxPoints = 600) =>
+    request<DeviceHistory>(
+      `/devices/${encodeURIComponent(deviceId)}/history?max_points=${maxPoints}`,
+    ),
+
+  // --- notifications ------------------------------------------------------ #
+  notifications: (opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) =>
+    request<NotificationPage>(
+      `/notifications?limit=${opts.limit ?? 50}&offset=${opts.offset ?? 0}` +
+        (opts.unreadOnly ? "&unread_only=true" : ""),
+    ),
+  markNotificationsRead: (ids?: number[]) =>
+    post<MessageResponse>("/notifications/read", ids ? { ids } : {}),
 };

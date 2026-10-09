@@ -61,19 +61,21 @@ class RecordingFrame:
     sim_time: str
     scales: dict[str, float]
 
-    def to_dict(self) -> dict:
+    def to_dict(self, device_ids: list[str] | tuple[str, ...] = APPLIANCE_IDS) -> dict:
         # Rounded to four decimals: below that the difference is far under the
         # sensor noise floor and only inflates the file.
         return {
             "t": self.sim_time,
-            "s": [round(self.scales.get(aid, 0.0), 4) for aid in APPLIANCE_IDS],
+            "s": [round(self.scales.get(aid, 0.0), 4) for aid in device_ids],
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "RecordingFrame":
+    def from_dict(
+        cls, data: dict, device_ids: list[str] | tuple[str, ...] = APPLIANCE_IDS
+    ) -> "RecordingFrame":
         return cls(
             sim_time=data["t"],
-            scales={aid: float(v) for aid, v in zip(APPLIANCE_IDS, data["s"])},
+            scales={aid: float(v) for aid, v in zip(device_ids, data["s"])},
         )
 
 
@@ -107,6 +109,7 @@ class Recorder:
         mode: str,
         seed: int,
         start_sim_time: datetime,
+        device_ids: list[str] | None = None,
     ) -> Path:
         """Begin a new recording, returning the file it will be written to."""
         self.stop()
@@ -122,7 +125,7 @@ class Recorder:
             mode=mode,
             seed=seed,
             created_at=datetime.now().isoformat(timespec="seconds"),
-            appliance_ids=list(APPLIANCE_IDS),
+            appliance_ids=list(device_ids or APPLIANCE_IDS),
             start_sim_time=start_sim_time.isoformat(),
         )
         self._handle = self._path.open("w", encoding="utf-8")
@@ -134,7 +137,8 @@ class Recorder:
         if self._handle is None:
             return
         frame = RecordingFrame(sim_time=sim_time.isoformat(), scales=scales)
-        self._handle.write(json.dumps(frame.to_dict()) + "\n")
+        ids = self._header.appliance_ids if self._header else APPLIANCE_IDS
+        self._handle.write(json.dumps(frame.to_dict(ids)) + "\n")
         self._frames += 1
 
     def stop(self) -> Path | None:
@@ -172,6 +176,8 @@ class Recording:
         path = Path(path)
         header: RecordingHeader | None = None
         frames: list[RecordingFrame] = []
+        # Recordings made before devices existed were written in catalogue order.
+        device_ids: list[str] | tuple[str, ...] = APPLIANCE_IDS
 
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -181,8 +187,9 @@ class Recording:
                 payload = json.loads(line)
                 if payload.get("type") == "header":
                     header = RecordingHeader.from_dict(payload)
+                    device_ids = header.appliance_ids or device_ids
                 else:
-                    frames.append(RecordingFrame.from_dict(payload))
+                    frames.append(RecordingFrame.from_dict(payload, device_ids))
 
         if header is None:
             raise ValueError(f"{path} has no header line -- not a valid recording")

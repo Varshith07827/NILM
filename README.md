@@ -369,8 +369,22 @@ python -m pip install -r requirements.txt
 **Frontend:**
 
 ```bash
-npm install --prefix frontend
+cd frontend && npm install
 ```
+
+(On Windows, `npm install --prefix frontend` looks for `package.json` in the
+project root and fails; installing from inside `frontend/` works everywhere.)
+
+**Admin account** — needed only to change the house, ratings, tariff or alert
+thresholds; watching the dashboard needs no login:
+
+```bash
+python -m backend.manage set-admin-password
+```
+
+It prompts for a password (twice, without echo). There is no default password.
+For a scripted setup, `NILM_ADMIN_PASSWORD` in `.env` creates the account on
+first start if none exists yet.
 
 **Optional — only if you want to retrain the model.** A trained model is already
 included in `ai/artifacts/`:
@@ -453,24 +467,67 @@ shows the new model's behaviour on identical input.
 
 ## The dashboard
 
-The dashboard is a seven-page application behind a persistent sidebar. The
+Every aspect of the dashboard has its own page, grouped in the sidebar. The
 WebSocket connection lives above the router, so navigating between pages never
 drops the stream or resets the charts, and the top bar keeps the live clock,
-power and cost visible whichever page you are on.
+power, cost and the notification bell visible whichever page you are on.
 
-| Page | What it is for |
-|---|---|
-| **Overview** | Headline metrics, live measurement traces, energy breakdown, simulation controls |
-| **3D Home** | The house in three dimensions — click appliances to switch them |
-| **Appliances** | Per-appliance detection with confidence and thresholds, plus the electrical signature table |
-| **Analytics** | Raw waveform oscilloscope, harmonic fingerprints, power-quality traces |
-| **Billing** | Cost, tariff selection, telescopic slab breakdown, cost per appliance |
-| **Reports** | Daily / weekly / monthly reports with CSV and PDF export |
-| **Diagnostics** | Live detector accuracy, model card, notifications, event timeline |
+| Group | Page | What it is for |
+|---|---|---|
+| Monitor | **Overview** | Headline metrics, the devices drawing most, load by room |
+| | **Live Charts** | Current, voltage, power and power factor over time |
+| | **Energy Breakdown** | How the metered power splits across devices |
+| | **Waveform** | Raw waveform oscilloscope, harmonic fingerprints |
+| Home | **3D Home** | The house in three dimensions; click a device for its usage and cost |
+| | **Rooms & Devices** | Rooms and the devices in each; admins add, move and remove them |
+| | **Appliances** | Every device with detection, confidence and power |
+| | **Appliance detail** (`/appliances/:id`) | One device's live power and current, energy, cost today and this month, cost by hour |
+| Money | **Billing** | Cost, telescopic slab breakdown, cost per device |
+| | **Reports** | Daily / weekly / monthly reports with CSV and PDF export |
+| System | **Simulation** | Start / pause / reset, scenario, speed, record and replay |
+| | **Model Accuracy** | Live detector accuracy, classifier output per type, model card |
+| | **Events** | Every switch-on and switch-off, and whether it was detected |
+| | **Notifications** | Every alert, with read / unread state and optional desktop pop-ups |
+| | **Admin** | Log in; edit the tariff, each device's power rating, alert thresholds |
 
 Every route except Overview is code-split. Three.js — by far the heaviest
 dependency — sits in its own chunk (248 KB gzipped) that is only downloaded
 when someone actually opens the 3D page.
+
+### Rooms, devices and same-type appliances
+
+The house is a set of **rooms** holding **devices**. The default house is the
+original twelve appliances plus a ceiling fan in every room; admins can add
+rooms (up to 12) and devices, move devices between rooms, and change any
+device's power rating (50–200% of the catalogue rating, the range the model
+was trained around). Changes reach the running simulation on the next window.
+
+Several devices of one type -- five ceiling fans -- raise a problem a single
+sensor cannot dodge: two identical fans draw identical waveforms, so "the
+bedroom fan is on" and "the study fan is on" are literally the same signal.
+The system handles it in two parts:
+
+- **Each extra device of a type gets a slightly different electrical
+  signature** (a phase shift of its current, like a different fan model with a
+  different run capacitor), so the devices are physically distinguishable.
+  This is internal; devices are named by room, e.g. "Bedroom Ceiling Fan".
+- **Which device is running is decided at switching events.** In steady state
+  the difference between two fans is buried under the fluctuation of a running
+  microwave, but at the moment one switches, everything else cancels and the
+  step matches that one device ([ai/device_tracker.py](ai/device_tracker.py)).
+
+The classifier still recognises *types*; how much of a type is running comes
+from the steady-state disaggregation, and which devices from the tracker. At
+most five devices of one type are allowed. Measured accuracy, and why it is
+lower than for the single-device house, is under [Known limitations](#known-limitations).
+
+### Notifications
+
+Alerts are stored in SQLite as they fire. The bell in the top bar shows the
+unread count; the Notifications page lists every alert with read / unread
+state. Desktop pop-ups (browser notifications, off by default) can be turned on
+from that page, for warnings only or for every alert. They work while the
+dashboard is open in a tab, including a background one.
 
 ### The 3D house
 
@@ -486,10 +543,10 @@ backlight flickers, and the tube light genuinely illuminates the kitchen. All of
 it is driven by the same numbers as the rest of the dashboard, so the picture
 and the figures cannot disagree.
 
-- **Click any appliance** to switch it at the socket. The detector then has to
-  work out what you did from the mains current alone — which is a far better
-  demonstration than a toggle switch, because the cause and the effect are in
-  the same view.
+- **Click any device** to see its power, current, energy, and cost today and
+  this month, with a link to its detail page. Switch it at the socket from
+  there; the detector then has to work out what you did from the mains current
+  alone.
 - **Scene lighting follows the simulated clock.** Switch to the Night scenario
   and the house genuinely goes dark; the only light left comes from appliances
   that are really drawing power.
@@ -500,12 +557,10 @@ and the figures cannot disagree.
   legible at a glance. Appliances are grouped the way a household groups them:
   the kitchen holds the refrigerator, microwave, mixer, induction stove and tube
   light; the bedroom holds the air conditioner and phone charger; and so on.
-- Camera presets (isometric, front, top-down, kitchen, living) plus orbit, pan
-  and zoom.
-
-Clicking an appliance also opens an inspector showing its confidence against
-its tuned decision threshold, estimated versus actual draw, energy and runtime
-for the day.
+- **Rooms added from the admin pages appear east of the original house**, and
+  devices are placed automatically on the ceiling, a wall, the floor or a small
+  table according to their type.
+- Camera presets (isometric, front, top-down) plus orbit, pan and zoom.
 
 ## API reference
 
@@ -542,10 +597,26 @@ Full interactive docs at `/docs`. Summary:
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/cost` · `/api/tariffs` · `/api/settings` | Cost breakdown, tariffs, settings |
-| `POST` | `/api/settings/tariff` | Select a preset or install a custom slab structure |
-| `POST` | `/api/settings/alerts` | Adjust alert thresholds live |
+| `POST` | `/api/settings/tariff` | Select a preset or install a custom slab structure (admin) |
+| `POST` | `/api/settings/alerts` | Adjust alert thresholds live (admin) |
 | `GET` | `/api/history` | Persisted readings, decimated in SQL to a chart-sized response |
 | `GET` | `/api/reports?period=daily\|weekly\|monthly&format=json\|csv\|pdf` | Reports |
+
+### House, devices, admin, notifications
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/auth/login` | Admin username + password → bearer token |
+| `GET` | `/api/auth/status` · `/api/auth/me` | Whether an admin exists · the logged-in admin |
+| `GET` | `/api/house` | Rooms, devices and the types that can be added |
+| `POST` · `PATCH` · `DELETE` | `/api/house/rooms[/{id}]` | Add, rename, remove a room (admin) |
+| `POST` · `PATCH` · `DELETE` | `/api/house/devices[/{id}]` | Add, rename / move / re-rate, remove a device (admin) |
+| `GET` | `/api/devices/{id}/history` | One device's power and current per second, energy and cost per hour |
+| `GET` | `/api/notifications` | Stored alerts, newest first, with unread count |
+| `POST` | `/api/notifications/read` | Mark some, or all, read |
+
+Admin routes need `Authorization: Bearer <token>`. Settings changed by the
+admin (tariff, alert thresholds, the house) are saved and restored on restart.
 
 ### WebSocket `/ws`
 
@@ -563,7 +634,8 @@ NILM/
 ├── simulator/              The virtual house — no AI in here
 │   ├── appliances.py       Catalogue: ratings, PF decomposition, harmonics, duty cycles
 │   ├── waveform.py         50 Hz synthesis, inrush, sag, sensor noise
-│   ├── house.py            Appliance state machines, aggregation, ground truth
+│   ├── devices.py          Rooms, devices, same-type signature variants
+│   ├── house.py            Device state machines, aggregation, ground truth
 │   ├── scenarios.py        Six behavioural scenarios + demo scripts
 │   └── replay.py           Recording and playback
 │
@@ -576,22 +648,25 @@ NILM/
 │   ├── export.py           BatchNorm folding, TFLite + NumPy bundle export
 │   ├── runtime.py          Dependency-free NumPy interpreter  ← runs in production
 │   ├── inference.py        Backend selection + classical NNLS baseline
-│   ├── disaggregate.py     Non-negative harmonic phasor attribution
+│   ├── disaggregate.py     Non-negative harmonic phasor attribution, per device
+│   ├── device_tracker.py   Which same-type device is on, from switching events
+│   ├── evaluate_devices.py Accuracy on multi-device houses
 │   └── artifacts/          Trained weights, thresholds, training report
 │
 ├── backend/
 │   ├── app/
 │   │   ├── main.py         FastAPI app and lifespan
 │   │   ├── core/config.py  Pydantic settings
-│   │   ├── api/routes/     live · simulation · history · cost · reports · ws
+│   │   ├── api/routes/     live · simulation · history · cost · reports · ws ·
+│   │   │                   auth · house · notifications
 │   │   ├── schemas/        Pydantic request/response models
 │   │   ├── db/             ORM models, session, repositories
 │   │   └── services/       pipeline · energy · cost · notifications · reports
-│   └── tests/              139 tests
+│   └── tests/              195 tests
 │
 ├── frontend/               React + TypeScript + Vite + Tailwind + shadcn/ui
 │   └── src/
-│       ├── pages/          One file per route (7 pages, all code-split)
+│       ├── pages/          One file per route (15 pages, all but Overview code-split)
 │       ├── components/
 │       │   ├── house/      The 3-D house: layout, appliance models, scene
 │       │   ├── layout/     App shell, sidebar, page header
@@ -627,7 +702,7 @@ ship a model whose NumPy runtime disagrees with Keras by more than 1 × 10⁻³.
 ## Testing
 
 ```bash
-python -m pytest                 # 139 tests, ~12 s
+python -m pytest                 # 195 tests, ~12 s
 python -m pytest -v              # verbose
 npm run build --prefix frontend  # frontend type-check + build
 ```
@@ -685,7 +760,19 @@ Stated plainly, because a reviewer will find them anyway:
 5. **A fixed appliance catalogue.** The model classifies the twelve appliances it
    was trained on; a new appliance requires retraining.
 6. **Steady-state disaggregation.** Attribution uses harmonic phasors from the
-   current window. Transients inform *detection* but not the watt-level split.
+   current window. Transients inform *detection*, and which of several same-type
+   devices is on, but not the watt-level split.
+7. **Several devices of one type cost accuracy.** The classifier was trained with
+   one device per type. With a ceiling fan in each of five rooms
+   (`python -m ai.evaluate_devices`), type-level F1 is 0.95-0.96 in the evening
+   scenario but 0.83 in the afternoon, when four or five fans run together and
+   the model partly reads 300+ W of fan load as a refrigerator compressor. The
+   right fan is identified in ~98% of windows when the type is detected
+   correctly and the house is quiet, and in ~73-80% with the shipped classifier.
+   Retraining on multi-device houses is the fix; it was not done here.
+8. **At most five devices per type.** Signature variants have to fit in a
+   limited range of phase angles; beyond five they would be too close to tell
+   apart.
 
 ---
 

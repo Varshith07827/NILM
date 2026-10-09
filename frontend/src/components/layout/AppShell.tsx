@@ -8,28 +8,37 @@
 
 import {
   Activity,
-  BarChart3,
+  Bell,
   Boxes,
   ChevronLeft,
   Cpu,
+  DoorOpen,
   FileText,
   Gauge,
+  History,
   Home,
   LayoutDashboard,
+  LineChart,
   Moon,
+  PieChart,
   Radio,
   Receipt,
+  ShieldCheck,
+  SlidersHorizontal,
   Sun,
+  Waves,
   WifiOff,
   Zap,
 } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
-import { useState } from "react";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/tooltip";
+import { useAuth } from "@/state/auth";
 import { useLive } from "@/state/live";
+import { useNotifications } from "@/state/notifications";
 import { cn, formatClock, formatCurrency, formatPower } from "@/lib/utils";
 
 interface NavItem {
@@ -39,48 +48,46 @@ interface NavItem {
   hint: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+/** One page per aspect of the dashboard, grouped by what you came to do. */
+const NAV_GROUPS: NavGroup[] = [
   {
-    to: "/",
-    label: "Overview",
-    icon: LayoutDashboard,
-    hint: "Headline metrics and live measurement traces",
+    label: "Monitor",
+    items: [
+      { to: "/", label: "Overview", icon: LayoutDashboard, hint: "Headline numbers at a glance" },
+      { to: "/live", label: "Live Charts", icon: LineChart, hint: "Current, voltage, power and power factor over time" },
+      { to: "/breakdown", label: "Energy Breakdown", icon: PieChart, hint: "How the metered power splits across devices" },
+      { to: "/waveform", label: "Waveform", icon: Waves, hint: "Raw waveform, harmonics and signatures" },
+    ],
   },
   {
-    to: "/home",
-    label: "3D Home",
-    icon: Home,
-    hint: "Walk the house, click appliances to switch them",
+    label: "Home",
+    items: [
+      { to: "/home", label: "3D Home", icon: Home, hint: "Walk the house; click a device for its usage and cost" },
+      { to: "/rooms", label: "Rooms & Devices", icon: DoorOpen, hint: "Rooms, and the devices in each" },
+      { to: "/appliances", label: "Appliances", icon: Boxes, hint: "Every device: detection, power, current and cost" },
+    ],
   },
   {
-    to: "/appliances",
-    label: "Appliances",
-    icon: Boxes,
-    hint: "Per-appliance detection, confidence and power",
+    label: "Money",
+    items: [
+      { to: "/billing", label: "Billing", icon: Receipt, hint: "Cost, tariff and slab breakdown" },
+      { to: "/reports", label: "Reports", icon: FileText, hint: "Daily, weekly and monthly reports with export" },
+    ],
   },
   {
-    to: "/analytics",
-    label: "Analytics",
-    icon: BarChart3,
-    hint: "Raw waveform, harmonics and power quality",
-  },
-  {
-    to: "/billing",
-    label: "Billing",
-    icon: Receipt,
-    hint: "Cost, tariffs and slab breakdown",
-  },
-  {
-    to: "/reports",
-    label: "Reports",
-    icon: FileText,
-    hint: "Daily, weekly and monthly reports with export",
-  },
-  {
-    to: "/diagnostics",
-    label: "Diagnostics",
-    icon: Cpu,
-    hint: "Model card, detector accuracy, events and alerts",
+    label: "System",
+    items: [
+      { to: "/control", label: "Simulation", icon: SlidersHorizontal, hint: "Start, pause, scenario, speed, record and replay" },
+      { to: "/accuracy", label: "Model Accuracy", icon: Cpu, hint: "Live detector scoring and the model card" },
+      { to: "/events", label: "Events", icon: History, hint: "Every switch-on and switch-off" },
+      { to: "/notifications", label: "Notifications", icon: Bell, hint: "Alerts, read and unread" },
+      { to: "/admin", label: "Admin", icon: ShieldCheck, hint: "Tariff, power ratings and alert thresholds" },
+    ],
   },
 ];
 
@@ -91,15 +98,20 @@ const MODE_LABEL: Record<string, string> = {
 };
 
 export function AppShell() {
-  const { frame, status, connection, theme, toggleTheme, alerts } = useLive();
+  const { frame, status, connection, theme, toggleTheme } = useLive();
+  const { unread } = useNotifications();
+  const { admin } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const { pathname } = useLocation();
+
+  // A new page starts at the top, not wherever the last one was scrolled to.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
 
   const model = status?.model;
   const running = frame?.state === "running";
   const power = formatPower(frame?.measurement.power_w ?? 0);
-  const unreadCritical = alerts.filter(
-    (alert) => alert.level === "critical" || alert.level === "warning",
-  ).length;
 
   return (
     <div className="flex min-h-screen">
@@ -128,51 +140,75 @@ export function AppShell() {
           ) : null}
         </div>
 
-        <nav className="flex-1 space-y-1 px-2.5 py-3">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const link = (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) =>
-                  cn(
-                    "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors",
-                    isActive
-                      ? "bg-primary/12 text-primary"
-                      : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-                    collapsed && "justify-center px-0",
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    {isActive ? (
-                      <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
-                    ) : null}
-                    <Icon className="h-4 w-4 shrink-0" />
-                    {!collapsed ? <span>{item.label}</span> : null}
-                    {!collapsed && item.to === "/diagnostics" && unreadCritical ? (
-                      <span className="ml-auto rounded bg-warning/20 px-1.5 text-[0.6rem] font-semibold text-warning">
-                        {unreadCritical}
-                      </span>
-                    ) : null}
-                  </>
-                )}
-              </NavLink>
-            );
+        <nav className="flex-1 space-y-3 overflow-y-auto px-2.5 py-3">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label} className="space-y-1">
+              {!collapsed ? (
+                <p className="px-2.5 pb-0.5 text-[0.6rem] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  {group.label}
+                </p>
+              ) : (
+                <div className="mx-3 border-t border-white/[0.05]" />
+              )}
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const badge =
+                  item.to === "/notifications" && unread
+                    ? String(unread > 99 ? "99+" : unread)
+                    : item.to === "/admin" && admin
+                      ? "on"
+                      : null;
+                const link = (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === "/" || item.to === "/appliances"}
+                    className={({ isActive }) =>
+                      cn(
+                        "relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                        isActive
+                          ? "bg-primary/12 text-primary"
+                          : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                        collapsed && "justify-center px-0",
+                      )
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        {isActive ? (
+                          <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
+                        ) : null}
+                        <Icon className="h-4 w-4 shrink-0" />
+                        {!collapsed ? <span>{item.label}</span> : null}
+                        {!collapsed && badge ? (
+                          <span
+                            className={cn(
+                              "ml-auto rounded px-1.5 text-[0.6rem] font-semibold",
+                              item.to === "/admin"
+                                ? "bg-success/20 text-success"
+                                : "bg-warning/20 text-warning",
+                            )}
+                          >
+                            {badge}
+                          </span>
+                        ) : null}
+                      </>
+                    )}
+                  </NavLink>
+                );
 
-            return collapsed ? (
-              <InfoTip key={item.to} label={item.label} side="right">
-                <div>{link}</div>
-              </InfoTip>
-            ) : (
-              <InfoTip key={item.to} label={item.hint} side="right">
-                <div>{link}</div>
-              </InfoTip>
-            );
-          })}
+                return (
+                  <InfoTip
+                    key={item.to}
+                    label={collapsed ? item.label : item.hint}
+                    side="right"
+                  >
+                    <div>{link}</div>
+                  </InfoTip>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* model summary at the foot of the rail */}
@@ -307,6 +343,19 @@ export function AppShell() {
                   {connection === "open" ? "Live" : connection}
                 </span>
               </Badge>
+            </InfoTip>
+
+            <InfoTip label={unread ? `${unread} unread notifications` : "Notifications"}>
+              <Button asChild variant="ghost" size="icon" className="relative">
+                <Link to="/notifications" aria-label="Notifications">
+                  <Bell className="h-4 w-4" />
+                  {unread ? (
+                    <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[0.55rem] font-bold leading-none text-destructive-foreground">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  ) : null}
+                </Link>
+              </Button>
             </InfoTip>
 
             <Button

@@ -45,9 +45,27 @@ def _configure_sqlite(dbapi_connection, _record) -> None:
     cursor.close()
 
 
+#: Columns added after the first release: (table, column, SQL definition).
+#: ``create_all`` never alters an existing table, so a database created by an
+#: older version gets them added here.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("notifications", "read", "BOOLEAN NOT NULL DEFAULT 0"),
+)
+
+
 def init_database() -> None:
-    """Create tables if they do not exist yet."""
+    """Create tables if they do not exist yet, and add any newer columns."""
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        for table, column, definition in _ADDED_COLUMNS:
+            existing = {
+                row[1]
+                for row in connection.exec_driver_sql(f"PRAGMA table_info({table})")
+            }
+            if column not in existing:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE {table} ADD COLUMN "{column}" {definition}'
+                )
 
 
 @contextmanager

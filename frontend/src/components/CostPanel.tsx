@@ -1,5 +1,6 @@
-import { IndianRupee, Receipt } from "lucide-react";
+import { IndianRupee, Lock, Receipt } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { InfoTip } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { cn, formatCurrency } from "@/lib/utils";
+import { useAuth } from "@/state/auth";
 import type { LiveFrame, SlabRow, Tariff } from "@/types";
 
 /**
@@ -33,8 +35,9 @@ export function CostPanel({
 }) {
   const [tariffs, setTariffs] = useState<Tariff[]>([]);
   const [slabs, setSlabs] = useState<SlabRow[]>([]);
-  const [activeTariff, setActiveTariff] = useState<string>("");
+  const [activeTariff, setActiveTariff] = useState<Tariff | null>(null);
   const [busy, setBusy] = useState(false);
+  const { admin } = useAuth();
 
   useEffect(() => {
     void api.tariffs().then(setTariffs).catch(() => undefined);
@@ -48,7 +51,7 @@ export function CostPanel({
         .cost()
         .then((response) => {
           setSlabs(response.slab_breakdown);
-          setActiveTariff(response.tariff.id);
+          setActiveTariff(response.tariff);
         })
         .catch(() => undefined);
 
@@ -64,7 +67,7 @@ export function CostPanel({
     setBusy(true);
     try {
       await api.setTariff({ tariff_id: tariffId });
-      setActiveTariff(tariffId);
+      setActiveTariff(tariffs.find((t) => t.id === tariffId) ?? null);
       onChanged();
     } finally {
       setBusy(false);
@@ -114,27 +117,40 @@ export function CostPanel({
 
         <Separator />
 
-        {/* --- tariff selection --- */}
+        {/* --- tariff: chosen by the admin, shown to everyone --- */}
         <div className="space-y-1.5">
           <span className="label-muted">Tariff</span>
-          <Select
-            value={activeTariff}
-            disabled={busy}
-            onValueChange={(value) => void changeTariff(value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select a tariff" />
-            </SelectTrigger>
-            <SelectContent>
-              {tariffs.map((tariff) => (
-                <SelectItem key={tariff.id} value={tariff.id}>
-                  {tariff.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {admin ? (
+            <Select
+              value={activeTariff?.id ?? ""}
+              disabled={busy}
+              onValueChange={(value) => void changeTariff(value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={activeTariff?.name ?? "Select a tariff"} />
+              </SelectTrigger>
+              <SelectContent>
+                {tariffs.map((tariff) => (
+                  <SelectItem key={tariff.id} value={tariff.id}>
+                    {tariff.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-secondary/30 px-3 py-2 text-xs">
+              <span className="font-medium">{activeTariff?.name ?? "—"}</span>
+              <Link
+                to="/admin"
+                className="flex items-center gap-1 text-[0.66rem] text-muted-foreground hover:text-foreground"
+              >
+                <Lock className="h-3 w-3" />
+                Admin can change
+              </Link>
+            </div>
+          )}
           <p className="text-[0.66rem] leading-relaxed text-muted-foreground">
-            {tariffs.find((t) => t.id === activeTariff)?.description}
+            {activeTariff?.description}
           </p>
         </div>
 

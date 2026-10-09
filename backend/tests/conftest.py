@@ -25,6 +25,12 @@ os.environ.setdefault("NILM_RECORDINGS_DIR", str(_TEST_DIR / "recordings"))
 # Tests drive the simulation explicitly; an autostarted loop would make them
 # depend on wall-clock timing.
 os.environ.setdefault("NILM_AUTOSTART", "false")
+# A throwaway admin for the test database only, created by the startup
+# bootstrap. Generated per run, so there is no fixed password anywhere.
+TEST_ADMIN_PASSWORD = os.environ.setdefault(
+    "NILM_ADMIN_PASSWORD", __import__("secrets").token_urlsafe(16)
+)
+os.environ.setdefault("NILM_ADMIN_USERNAME", "admin")
 
 import pytest  # noqa: E402
 
@@ -58,3 +64,14 @@ def client():
 
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="session")
+def admin_headers(client) -> dict[str, str]:
+    """Authorization header for the test admin."""
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": TEST_ADMIN_PASSWORD},
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}

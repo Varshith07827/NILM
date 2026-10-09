@@ -39,7 +39,7 @@ from typing import Any
 
 import numpy as np
 
-from ai.disaggregate import disaggregate
+from ai.disaggregate import DeviceDisaggregator
 from ai.features import FeatureExtractor, WindowFeatures
 from ai.inference import InferenceEngine
 from backend.app.core.config import Settings
@@ -47,13 +47,16 @@ from backend.app.db.repositories.energy import TOTAL_KEY, UNATTRIBUTED_KEY
 from backend.app.services.cost import Tariff, get_tariff
 from backend.app.services.energy import EnergyTracker
 from backend.app.services.notifications import AlertContext, NotificationEngine
-from simulator.appliances import APPLIANCE_IDS, APPLIANCES_BY_ID
+from simulator.appliances import APPLIANCE_CATALOGUE
+from simulator.devices import DeviceConfig, RoomConfig, catalogue_devices
 from simulator.house import RawWindow, VirtualHouse
 from simulator.replay import Recorder, Recording, RecordingPlayer, list_recordings
 from simulator.scenarios import SCENARIOS_BY_ID, SimulationMode
 from simulator.waveform import MAINS_FREQUENCY_HZ, SAMPLE_RATE_HZ
 
 logger = logging.getLogger(__name__)
+
+_TYPE_NAMES: dict[str, str] = {spec.id: spec.name for spec in APPLIANCE_CATALOGUE}
 
 #: Samples of the raw waveform sent to the dashboard oscilloscope each window.
 #: Two complete mains cycles is enough to see the shape without flooding the
@@ -65,6 +68,11 @@ ACCURACY_WINDOW: int = 300
 
 #: How many windows an appliance event waits for the model to confirm it.
 DETECTION_GRACE_WINDOWS: int = 6
+
+#: A device counts as "on" when it is attributed this fraction of its rating.
+#: The classifier only decides *types*; with several devices of one type it is
+#: the disaggregator that says which of them is running.
+DEVICE_ON_FRACTION: float = 0.3
 
 ALLOWED_SPEEDS: tuple[int, ...] = (1, 2, 5, 10, 20, 60)
 
@@ -105,7 +113,12 @@ class PipelineStats:
 class NILMPipeline:
     """Owns the simulation, the model and every derived stream."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        devices: list[DeviceConfig] | None = None,
+        rooms: list[RoomConfig] | None = None,
+    ) -> None:
         self.settings = settings
 
         # --- simulation --------------------------------------------------- #
@@ -114,12 +127,17 @@ class NILMPipeline:
         self.speed = settings.default_speed
         self.state = SimulationState.STOPPED
         self.seed = 20240501
+        self.rooms: list[RoomConfig] = list(rooms or [])
         self.house = VirtualHouse(
-            scenario_id=self.scenario_id, mode=self.mode, seed=self.seed
+            scenario_id=self.scenario_id,
+            mode=self.mode,
+            seed=self.seed,
+            devices=devices if devices is not None else catalogue_devices(),
         )
 
         # --- edge chain --------------------------------------------------- #
         self.extractor = FeatureExtractor()
+        self.disaggregator = DeviceDisaggregator(list(self.house.specs.values()))
         self.engine = InferenceEngine(
             artifact_dir=settings.artifact_dir, backend=settings.inference_backend
         )
@@ -314,6 +332,17 @@ class NILMPipeline:
         event = self.house.set_appliance(appliance_id, on)
         return event.to_dict() if event else None
 
+    def apply_house(self, rooms: list[RoomConfig], devices: list[DeviceConfig]) -> None:
+        """Swap in an edited house configuration without stopping the loop.
+
+        Runs on the event loop thread, between windows, so the loop never sees
+        a half-applied configuration.
+        """
+        self.rooms = list(rooms)
+        self.house.configure(devices)
+        self.disaggregator = DeviceDisaggregator(list(self.house.specs.values()))
+        self._broadcast_status()
+
     def set_tariff(self, tariff: Tariff) -> None:
         self.tariff = tariff
         self.tracker.set_tariff(tariff)
@@ -330,6 +359,7 @@ class NILMPipeline:
             mode=self.mode.value,
             seed=self.seed,
             start_sim_time=self.house.sim_time,
+            device_ids=list(self.house.states),
         )
         self.recording_name = name
         return path.name
@@ -383,7 +413,12 @@ class NILMPipeline:
                 elapsed = loop.time() - started
                 self._loop_ms.append(elapsed * 1000.0)
 
-                if len(self._reading_rows) >= self.settings.persist_batch_size:
+                # Alerts are rare and someone may be waiting on the bell, so
+                # they are written at once rather than with the next batch.
+                if (
+                    len(self._reading_rows) >= self.settings.persist_batch_size
+                    or self._notification_rows
+                ):
                     await self.flush()
 
                 interval = 1.0 / max(self.speed, 1)
@@ -433,7 +468,8 @@ class NILMPipeline:
         detected = set(result.detected)
 
         # --- 4. disaggregation ---------------------------------------------- #
-        attribution = disaggregate(
+        specs = self.house.specs
+        attribution = self.disaggregator.solve(
             window.current,
             total_power_w=features.real_power_w,
             voltage_rms=features.v_rms,
@@ -455,7 +491,13 @@ class NILMPipeline:
         newly_stopped = sorted(self._previous_detected - detected)
         self._previous_detected = detected
 
-        self._register_events(window, detected)
+        devices_on = {
+            device_id
+            for device_id, watts in attribution.power_w.items()
+            if device_id in specs
+            and watts >= DEVICE_ON_FRACTION * specs[device_id].rated_power_w
+        }
+        self._register_events(window, devices_on)
 
         alerts = self.notifier.evaluate(
             AlertContext(
@@ -476,6 +518,7 @@ class NILMPipeline:
                 cost_today_inr=energy.cost.today_inr,
                 energy_today_wh=energy.energy_wh_today,
                 currency_symbol=self.tariff.currency_symbol,
+                specs=specs,
             )
         )
         for alert in alerts:
@@ -495,7 +538,8 @@ class NILMPipeline:
             )
 
         # --- 7. scoring -------------------------------------------------------- #
-        truth = {aid for aid in APPLIANCE_IDS if window.ground_truth.drawing[aid]}
+        # Scored at the level the classifier works at: catalogue types.
+        truth = window.ground_truth.drawing_types()
         self._accuracy.append(
             (
                 len(detected & truth),
@@ -511,7 +555,7 @@ class NILMPipeline:
 
         # --- 9. the frame ------------------------------------------------------ #
         frame_payload = self._build_frame(
-            window, features, result, attribution, energy, alerts
+            window, features, result, attribution, energy, alerts, devices_on
         )
         self.buffer.append(frame_payload)
         self.latest_frame = frame_payload
@@ -526,8 +570,14 @@ class NILMPipeline:
 
     # ------------------------------------------------------------------ #
 
-    def _register_events(self, window: RawWindow, detected: set[str]) -> None:
-        """Queue simulator events and check whether the model confirms them."""
+    def _register_events(self, window: RawWindow, devices_on: set[str]) -> None:
+        """Queue simulator events and check whether the model confirms them.
+
+        Confirmation is per device: the classifier must have detected the type
+        *and* the disaggregator must have given this particular device its
+        share, so switching on the study fan is not "confirmed" by the
+        bedroom fan already running.
+        """
         for event in window.events:
             payload = event.to_dict()
             self.recent_events.appendleft(payload)
@@ -557,7 +607,7 @@ class NILMPipeline:
         # respond within the same second it was switched would be unfair.
         still_pending: list[_PendingEvent] = []
         for pending in self._pending_events:
-            is_on = pending.appliance_id in detected
+            is_on = pending.appliance_id in devices_on
             wanted = is_on if pending.action == "on" else not is_on
             if wanted and not pending.detected:
                 pending.detected = True
@@ -664,37 +714,74 @@ class NILMPipeline:
         attribution,
         energy,
         alerts,
+        devices_on: set[str],
     ) -> dict:
         """Assemble the JSON frame broadcast to the dashboard."""
+        truth = window.ground_truth
+        room_names = {room.id: room.name for room in self.rooms}
+        detected_types = set(result.detected)
+        voltage = max(features.v_rms, 1.0)
+
         appliances = []
-        for appliance_id in APPLIANCE_IDS:
-            spec = APPLIANCES_BY_ID[appliance_id]
-            totals = energy.per_appliance.get(appliance_id)
-            probability = result.probabilities.get(appliance_id, 0.0)
+        for device_id, state in self.house.states.items():
+            spec = state.spec
+            kind = spec.kind
+            device = self.house.device_configs.get(device_id)
+            totals = energy.per_appliance.get(device_id)
+            estimated_w = attribution.power_w.get(device_id, 0.0)
             appliances.append(
                 {
-                    "id": appliance_id,
+                    "id": device_id,
+                    "type_id": kind,
+                    "type_name": _TYPE_NAMES.get(kind, kind),
                     "name": spec.name,
+                    "room_id": device.room_id if device else "",
+                    "room_name": room_names.get(device.room_id, "") if device else "",
                     "icon": spec.icon,
                     "category": spec.category,
                     "colour": spec.colour,
                     "rated_power_w": spec.rated_power_w,
-                    "probability": round(probability, 4),
-                    "threshold": round(self.engine.thresholds.get(appliance_id, 0.5), 3),
-                    "detected": appliance_id in result.detected,
-                    "estimated_power_w": round(
-                        attribution.power_w.get(appliance_id, 0.0), 1
+                    "power_factor": round(spec.power_factor, 3),
+                    # Classifier output is per type, shared by its devices.
+                    "probability": round(result.probabilities.get(kind, 0.0), 4),
+                    "threshold": round(self.engine.thresholds.get(kind, 0.5), 3),
+                    "type_detected": kind in detected_types,
+                    "detected": device_id in devices_on,
+                    "estimated_power_w": round(estimated_w, 1),
+                    "estimated_current_a": round(
+                        estimated_w / (voltage * max(spec.power_factor, 0.05)), 4
                     ),
                     # Ground truth travels beside the prediction so the UI can
                     # show both. The model never sees these fields.
-                    "actual_power_w": round(window.ground_truth.power_w[appliance_id], 1),
-                    "actually_on": window.ground_truth.drawing[appliance_id],
-                    "socket_on": window.ground_truth.socket_on[appliance_id],
+                    "actual_power_w": round(truth.power_w.get(device_id, 0.0), 1),
+                    "actual_current_a": round(truth.current_a.get(device_id, 0.0), 4),
+                    "actually_on": truth.drawing.get(device_id, False),
+                    "socket_on": truth.socket_on.get(device_id, False),
                     "energy_wh_today": round(totals.energy_wh_today, 3) if totals else 0.0,
                     "cost_today_inr": round(totals.cost_inr_today, 3) if totals else 0.0,
+                    "cost_month_inr": round(totals.cost_inr_month, 3) if totals else 0.0,
                     "runtime_s_today": round(totals.runtime_s_today, 0) if totals else 0.0,
                 }
             )
+
+        truth_types = truth.drawing_types()
+        device_count: dict[str, int] = {}
+        for state in self.house.states.values():
+            device_count[state.spec.kind] = device_count.get(state.spec.kind, 0) + 1
+        types = [
+            {
+                "id": spec.id,
+                "name": spec.name,
+                "icon": spec.icon,
+                "colour": spec.colour,
+                "probability": round(result.probabilities.get(spec.id, 0.0), 4),
+                "threshold": round(self.engine.thresholds.get(spec.id, 0.5), 3),
+                "detected": spec.id in detected_types,
+                "actually_on": spec.id in truth_types,
+                "device_count": device_count.get(spec.id, 0),
+            }
+            for spec in APPLIANCE_CATALOGUE
+        ]
 
         true_positive = sum(row[0] for row in self._accuracy)
         false_positive = sum(row[1] for row in self._accuracy)
@@ -761,6 +848,8 @@ class NILMPipeline:
                 "currency_symbol": energy.cost.currency_symbol,
             },
             "appliances": appliances,
+            "types": types,
+            "rooms": [{"id": room.id, "name": room.name} for room in self.rooms],
             "detected": list(result.detected),
             "unattributed_w": round(attribution.unattributed_w, 1),
             "residual_a": round(attribution.residual_a, 4),

@@ -2,23 +2,31 @@ import {
   Activity,
   BatteryCharging,
   Cpu,
+  DoorOpen,
   IndianRupee,
   LayoutDashboard,
   Percent,
   Waves,
   Zap,
 } from "lucide-react";
+import { useMemo } from "react";
+import { Link } from "react-router-dom";
 
-import { EnergyBreakdown } from "@/components/EnergyBreakdown";
-import { LiveCharts } from "@/components/LiveCharts";
-import { SimulationControls } from "@/components/SimulationControls";
 import { StatCard } from "@/components/StatCard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { applianceIcon } from "@/lib/icons";
 import { formatCurrency, formatEnergy, formatPower, percent } from "@/lib/utils";
 import { useLive } from "@/state/live";
 
+const TOP_DEVICES = 6;
+
+/**
+ * The headline numbers at a glance. Each aspect of the dashboard -- charts,
+ * breakdown, waveform, controls, accuracy -- has its own page in the sidebar.
+ */
 export default function Overview() {
-  const { frame, history, status, scenarios, onChanged } = useLive();
+  const { frame } = useLive();
 
   const measurement = frame?.measurement;
   const energy = frame?.energy;
@@ -31,12 +39,41 @@ export default function Overview() {
     ? (measurement?.power_w ?? 0) / energy.sanctioned_load_w
     : 0;
 
+  const topDevices = useMemo(
+    () =>
+      (frame?.appliances ?? [])
+        .filter((device) => device.detected)
+        .sort((a, b) => b.estimated_power_w - a.estimated_power_w)
+        .slice(0, TOP_DEVICES),
+    [frame?.appliances],
+  );
+
+  const roomLoads = useMemo(() => {
+    const rooms = (frame?.rooms ?? []).map((room) => ({
+      ...room,
+      watts: 0,
+      running: 0,
+      total: 0,
+    }));
+    const index = Object.fromEntries(rooms.map((room) => [room.id, room]));
+    for (const device of frame?.appliances ?? []) {
+      const room = index[device.room_id];
+      if (!room) continue;
+      room.total += 1;
+      if (device.detected) {
+        room.running += 1;
+        room.watts += device.estimated_power_w;
+      }
+    }
+    return rooms.sort((a, b) => b.watts - a.watts);
+  }, [frame?.appliances, frame?.rooms]);
+
   return (
     <div className="space-y-4">
       <PageHeader
         icon={LayoutDashboard}
         title="Overview"
-        description="Everything the meter sees right now, and what the model makes of it."
+        description="The headline numbers right now. Charts, breakdown, waveform, controls and accuracy each have their own page."
       />
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
@@ -116,18 +153,94 @@ export default function Overview() {
         />
       </section>
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <div className="space-y-4 xl:col-span-8">
-          <LiveCharts history={history} />
-          <EnergyBreakdown frame={frame} />
-        </div>
-        <div className="xl:col-span-4">
-          <SimulationControls
-            status={status}
-            scenarios={scenarios}
-            onChanged={onChanged}
-          />
-        </div>
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle>
+              <Zap className="h-3.5 w-3.5 text-primary" />
+              Drawing the most now
+            </CardTitle>
+            <Link
+              to="/appliances"
+              className="text-[0.66rem] text-muted-foreground hover:text-foreground"
+            >
+              All appliances →
+            </Link>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {topDevices.length === 0 ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">
+                Nothing is running.
+              </p>
+            ) : (
+              topDevices.map((device) => {
+                const Icon = applianceIcon(device.icon);
+                const watts = formatPower(device.estimated_power_w);
+                return (
+                  <Link
+                    key={device.id}
+                    to={`/appliances/${encodeURIComponent(device.id)}`}
+                    className="flex items-center gap-2.5 rounded-md px-1.5 py-1 hover:bg-secondary/50"
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: device.colour }} />
+                    <span className="min-w-0 flex-1 truncate text-[0.72rem]">
+                      {device.name}
+                    </span>
+                    <span className="text-[0.62rem] text-muted-foreground">
+                      {formatCurrency(device.cost_today_inr, symbol)} today
+                    </span>
+                    <span className="w-16 text-right font-mono text-xs font-semibold tabular-nums">
+                      {watts.value} {watts.unit}
+                    </span>
+                  </Link>
+                );
+              })
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle>
+              <DoorOpen className="h-3.5 w-3.5 text-primary" />
+              Load by room
+            </CardTitle>
+            <Link
+              to="/home"
+              className="text-[0.66rem] text-muted-foreground hover:text-foreground"
+            >
+              3D Home →
+            </Link>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {roomLoads.map((room) => {
+              const watts = formatPower(room.watts);
+              const share = measurement?.power_w ? room.watts / measurement.power_w : 0;
+              return (
+                <div key={room.id} className="space-y-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[0.72rem] font-medium">{room.name}</span>
+                    <span className="text-[0.62rem] text-muted-foreground">
+                      {room.running}/{room.total} on
+                    </span>
+                    <span className="ml-auto font-mono text-xs font-semibold tabular-nums">
+                      {watts.value}
+                      <span className="ml-0.5 text-[0.62rem] font-normal text-muted-foreground">
+                        {watts.unit}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary/70">
+                    <div
+                      className="h-full rounded-full bg-primary transition-[width] duration-500"
+                      style={{ width: `${Math.min(100, share * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
       </section>
     </div>
   );

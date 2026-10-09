@@ -19,13 +19,8 @@ from enum import Enum
 
 import numpy as np
 
-from .appliances import (
-    APPLIANCE_CATALOGUE,
-    APPLIANCE_IDS,
-    NOMINAL_VOLTAGE_V,
-    ApplianceSpec,
-    get_appliance,
-)
+from .appliances import NOMINAL_VOLTAGE_V, ApplianceSpec
+from .devices import DeviceConfig, catalogue_devices, device_spec
 from .scenarios import (
     DEFAULT_SCENARIO_ID,
     EventAction,
@@ -144,10 +139,17 @@ class GroundTruth:
     drawing: dict[str, bool] = field(default_factory=dict)
     power_w: dict[str, float] = field(default_factory=dict)
     current_a: dict[str, float] = field(default_factory=dict)
+    #: Device id -> catalogue type, so truth can be scored at the level the
+    #: classifier works at.
+    type_of: dict[str, str] = field(default_factory=dict)
 
     @property
     def active_ids(self) -> list[str]:
         return [aid for aid, on in self.drawing.items() if on]
+
+    def drawing_types(self) -> set[str]:
+        """Catalogue types with at least one device drawing power."""
+        return {self.type_of.get(aid, aid) for aid, on in self.drawing.items() if on}
 
 
 @dataclass
@@ -165,7 +167,11 @@ class RawWindow:
 
 
 class VirtualHouse:
-    """A simulated household with twelve appliances on one mains feed."""
+    """A simulated household: configured devices sharing one mains feed.
+
+    With no ``devices`` argument the house holds exactly one device per
+    catalogue type (the house the model was trained on).
+    """
 
     def __init__(
         self,
@@ -173,6 +179,7 @@ class VirtualHouse:
         mode: SimulationMode = SimulationMode.DEMO,
         seed: int = 20240501,
         start_date: datetime | None = None,
+        devices: list[DeviceConfig] | None = None,
     ) -> None:
         self.scenario: Scenario = get_scenario(scenario_id)
         self.mode: SimulationMode = mode
@@ -182,10 +189,8 @@ class VirtualHouse:
             microsecond=0, second=0, minute=0, hour=0
         )
 
-        self.states: dict[str, ApplianceState] = {
-            spec.id: ApplianceState(spec=spec, kernel=HarmonicKernel.from_spec(spec))
-            for spec in APPLIANCE_CATALOGUE
-        }
+        self.states: dict[str, ApplianceState] = {}
+        self._build_states(devices if devices is not None else catalogue_devices())
 
         self.sim_seconds: float = 0.0
         self._grid_drift_v: float = 0.0
@@ -208,13 +213,50 @@ class VirtualHouse:
         )
 
     # ------------------------------------------------------------------ #
+    # Devices
+    # ------------------------------------------------------------------ #
+
+    def _build_states(self, devices: list[DeviceConfig]) -> None:
+        previous = self.states
+        self.states = {}
+        self.device_configs: dict[str, DeviceConfig] = {d.id: d for d in devices}
+        for device in devices:
+            spec = device_spec(device)
+            old = previous.get(device.id)
+            if old is not None and old.spec.kind == spec.kind:
+                # Keep what the device is doing; only its signature changes.
+                old.spec = spec
+                old.kernel = HarmonicKernel.from_spec(spec)
+                self.states[device.id] = old
+            else:
+                self.states[device.id] = ApplianceState(
+                    spec=spec, kernel=HarmonicKernel.from_spec(spec)
+                )
+
+    def configure(self, devices: list[DeviceConfig]) -> None:
+        """Replace the device list while running.
+
+        Devices that survive keep their on/off state; new ones start off;
+        removed ones simply stop contributing current.
+        """
+        self._build_states(devices)
+
+    @property
+    def specs(self) -> dict[str, ApplianceSpec]:
+        return {aid: state.spec for aid, state in self.states.items()}
+
+    def _devices_of_type(self, type_id: str) -> list[ApplianceState]:
+        return [s for s in self.states.values() if s.spec.kind == type_id]
+
+    # ------------------------------------------------------------------ #
     # Scenario / lifecycle
     # ------------------------------------------------------------------ #
 
     def _apply_scenario_defaults(self) -> None:
         """Put the house into a plausible state for the start of the scenario."""
         hour = int(self.scenario.start_hour) % 24
-        for aid, state in self.states.items():
+        for state in self.states.values():
+            kind = state.spec.kind
             state.socket_on = False
             state.switched_on_at = -1e9
             state.scheduled_off_at = math.inf
@@ -223,9 +265,9 @@ class VirtualHouse:
             state.fluctuation = 0.0
             state.manual_hold_until = -1e9
 
-            if aid in self.scenario.never_on:
+            if kind in self.scenario.never_on:
                 continue
-            if aid in self.scenario.always_on:
+            if kind in self.scenario.always_on:
                 self._switch_on(state, EventSource.SCENARIO, log=False)
                 continue
             # In free-running simulation, seed the house so it does not start
@@ -234,7 +276,7 @@ class VirtualHouse:
             if self.mode is SimulationMode.SIMULATION:
                 probability = (
                     state.spec.hourly_probability[hour]
-                    * self.scenario.probability_scale.get(aid, 1.0)
+                    * self.scenario.probability_scale.get(kind, 1.0)
                     * self.scenario.activity
                 )
                 if self._rng.random() < min(0.85, probability * 0.5):
@@ -327,8 +369,9 @@ class VirtualHouse:
 
     def set_appliance(self, appliance_id: str, on: bool) -> ApplianceEvent | None:
         """Manual control from the dashboard."""
-        spec = get_appliance(appliance_id)
-        state = self.states[spec.id]
+        state = self.states.get(appliance_id)
+        if state is None:
+            raise KeyError(f"unknown device {appliance_id!r}")
         before = len(self._pending_events)
         if on:
             self._switch_on(state, EventSource.MANUAL, note="Switched from dashboard")
@@ -357,7 +400,13 @@ class VirtualHouse:
         ):
             event = script[self._script_cursor]
             self._script_cursor += 1
+            # Scripts name catalogue types. The device whose id is the type id
+            # (the original one) takes the event; failing that, the first
+            # device of that type.
             state = self.states.get(event.appliance_id)
+            if state is None:
+                candidates = self._devices_of_type(event.appliance_id)
+                state = candidates[0] if candidates else None
             if state is None:
                 continue
             if event.action is EventAction.ON:
@@ -368,7 +417,8 @@ class VirtualHouse:
     def _advance_autonomous(self, dt: float) -> None:
         """Let each appliance decide for itself (SIMULATION mode)."""
         hour = self.sim_time.hour
-        for aid, state in self.states.items():
+        for state in self.states.values():
+            aid = state.spec.kind
             if aid in self.scenario.never_on:
                 self._switch_off(state, EventSource.SCENARIO, log=False)
                 continue
@@ -482,6 +532,7 @@ class VirtualHouse:
             truth.drawing[aid] = state.is_drawing
             truth.power_w[aid] = true_power
             truth.current_a[aid] = true_current
+            truth.type_of[aid] = spec.kind
 
         # Analogue front-end noise sits on the aggregate, not on each load.
         total_current += sensor_noise(SAMPLES_PER_WINDOW, self._rng)
@@ -558,12 +609,12 @@ class VirtualHouse:
     def snapshot(self) -> list[dict]:
         """Per-appliance state for the dashboard."""
         out = []
-        for aid in APPLIANCE_IDS:
-            state = self.states[aid]
+        for aid, state in self.states.items():
             spec = state.spec
             out.append(
                 {
                     "id": aid,
+                    "type_id": spec.kind,
                     "name": spec.name,
                     "icon": spec.icon,
                     "category": spec.category,
