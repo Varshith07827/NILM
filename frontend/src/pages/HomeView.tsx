@@ -5,11 +5,14 @@ import {
   EyeOff,
   Home,
   Loader2,
+  Maximize2,
+  Menu,
+  Minimize2,
   MousePointerClick,
   Power,
   RotateCcw,
 } from "lucide-react";
-import { Suspense, lazy, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { ClampExplainer } from "@/components/house/ClampExplainer";
@@ -37,6 +40,7 @@ import {
   percent,
 } from "@/lib/utils";
 import { useLive } from "@/state/live";
+import { useShell } from "@/state/shell";
 import type { ApplianceFrame } from "@/types";
 
 /**
@@ -62,6 +66,47 @@ export default function HomeView() {
   const [preset, setPreset] = useState<CameraPreset>("isometric");
   const [busy, setBusy] = useState<string | null>(null);
   const [explainClamp, setExplainClamp] = useState(false);
+  const { immersive, setImmersive, setNavOpen } = useShell();
+
+  // --- full screen ------------------------------------------------------ //
+  // "Full screen" is both things: the browser's own full screen, and the
+  // shell stepping aside (no sidebar, top bar or footer) so the house fills
+  // it. The sidebar can still be brought back as an overlay.
+  const enterFullScreen = useCallback(() => {
+    setImmersive(true);
+    setNavOpen(false);
+    void document.documentElement.requestFullscreen?.().catch(() => undefined);
+  }, [setImmersive, setNavOpen]);
+
+  const exitFullScreen = useCallback(() => {
+    setImmersive(false);
+    setNavOpen(false);
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+  }, [setImmersive, setNavOpen]);
+
+  useEffect(() => {
+    // Esc leaves the browser's full screen by itself; follow it.
+    const onChange = () => {
+      if (!document.fullscreenElement) setImmersive(false);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, [setImmersive]);
+
+  useEffect(() => {
+    // Where the browser refused full screen, Esc still gets you out.
+    if (!immersive) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !document.fullscreenElement && !explainClamp) {
+        exitFullScreen();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [immersive, explainClamp, exitFullScreen]);
+
+  // Leaving the page always restores the normal layout.
+  useEffect(() => () => exitFullScreen(), [exitFullScreen]);
 
   const appliances = frame?.appliances ?? [];
   const rooms = frame?.rooms ?? [];
@@ -118,6 +163,19 @@ export default function HomeView() {
     }
   };
 
+  const toggleMain = async () => {
+    if (!frame) return;
+    setBusy("__main__");
+    try {
+      await api.setMainSwitch(!frame.main_on);
+      onChanged();
+    } catch {
+      /* the next frame shows the real state either way */
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const detectedCount = appliances.filter((a) => a.detected).length;
   const actualCount = appliances.filter((a) => a.actually_on).length;
   const mismatches = appliances.filter(
@@ -150,8 +208,27 @@ export default function HomeView() {
         {/* ------------------------------------------------------------ */}
         {/* the scene                                                     */}
         {/* ------------------------------------------------------------ */}
-        <Card className="relative overflow-hidden xl:col-span-8">
+        <Card
+          className={cn(
+            "relative overflow-hidden",
+            immersive
+              ? "fixed inset-0 z-50 rounded-none border-0 bg-background"
+              : "xl:col-span-8",
+          )}
+        >
           <div className="absolute left-4 top-4 z-10 flex flex-wrap items-center gap-1.5">
+            {immersive ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-[0.68rem] backdrop-blur-md"
+                onClick={() => setNavOpen(true)}
+                aria-label="Open the navigation menu"
+              >
+                <Menu className="h-3.5 w-3.5" />
+                Menu
+              </Button>
+            ) : null}
             {CAMERA_PRESET_NAMES.map((name) => (
               <Button
                 key={name}
@@ -166,6 +243,7 @@ export default function HomeView() {
           </div>
 
           <div className="absolute right-4 top-4 z-10 flex flex-col items-end gap-1.5">
+
             <Badge variant="secondary" className="backdrop-blur-md">
               {detectedCount} running
             </Badge>
@@ -183,12 +261,61 @@ export default function HomeView() {
             ) : null}
           </div>
 
-          <div className="absolute bottom-3 left-4 z-10 flex items-center gap-1.5 rounded-md border border-border/50 bg-background/70 px-2 py-1 text-[0.64rem] text-muted-foreground backdrop-blur-md">
+          {/* Bottom-right is the one corner nothing else uses, at any width. */}
+          <div className="absolute bottom-3 right-4 z-10">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-[0.68rem] backdrop-blur-md"
+                onClick={immersive ? exitFullScreen : enterFullScreen}
+                aria-label={immersive ? "Exit full screen" : "View the 3D house full screen"}
+              >
+                {immersive ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+                {immersive ? "Exit full screen" : "Full screen"}
+              </Button>
+          </div>
+
+          <div className="absolute bottom-3 left-4 z-10 flex max-w-[calc(100%-11rem)] items-center gap-1.5 rounded-md border border-border/50 bg-background/70 px-2 py-1 text-[0.64rem] text-muted-foreground backdrop-blur-md">
             <MousePointerClick className="h-3 w-3" />
             Click a device to inspect · drag to orbit · scroll to zoom
           </div>
 
-          <div className="h-[420px] w-full sm:h-[560px] xl:h-[640px]">
+          {immersive && selected ? (
+            <div className="absolute right-4 top-24 z-10 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border/60 bg-card/90 p-3 shadow-2xl backdrop-blur-md">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 truncate text-xs font-semibold">
+                  <Box className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  {selected.name}
+                </p>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => setSelectedId(null)}
+                  aria-label="Close the inspector"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <ApplianceInspector
+                appliance={selected}
+                showTruth={showTruth}
+                busy={busy === selected.id}
+                onToggle={() => void toggle(selected)}
+                currencySymbol={frame?.cost.currency_symbol ?? "₹"}
+              />
+            </div>
+          ) : null}
+
+          <div
+            className={cn(
+              "w-full",
+              immersive ? "h-screen" : "h-[420px] sm:h-[560px] xl:h-[640px]",
+            )}
+          >
             <Suspense
               fallback={
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -208,7 +335,9 @@ export default function HomeView() {
                   cameraPosition={cameraPosition(preset, layout)}
                   currentA={frame.measurement.current_a}
                   powerW={frame.measurement.power_w}
+                  mainOn={frame.main_on}
                   onSelectClamp={() => setExplainClamp(true)}
+                  onToggleMain={() => void toggleMain()}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">

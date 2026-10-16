@@ -71,13 +71,18 @@ function Body({
 
 function CeilingFan(props: ModelProps) {
   const blades = useRef<THREE.Group>(null);
+  const speed = useRef(0);
   const ratio = loadRatio(props);
 
   useFrame((_, delta) => {
     if (blades.current) {
       // A ceiling fan at full tilt is roughly 300 rpm; scale with draw so a
-      // regulator set low visibly spins slower.
-      blades.current.rotation.y += delta * (2 + ratio * 22);
+      // regulator set low visibly spins slower. Switched off, it coasts down
+      // to a stop rather than halting dead -- or idling forever.
+      const target = props.active ? 2 + ratio * 22 : 0;
+      speed.current += (target - speed.current) * Math.min(1, delta * 1.5);
+      if (speed.current < 0.02 && target === 0) speed.current = 0;
+      blades.current.rotation.y += delta * speed.current;
     }
   });
 

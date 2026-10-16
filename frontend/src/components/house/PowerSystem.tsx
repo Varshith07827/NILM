@@ -23,6 +23,8 @@ const IDLE_CABLE = "#334155";
 const LIVE_CABLE = "#22d3ee";
 const SUPPLY_CABLE = "#f59e0b";
 const CLAMP_BLUE = "#1d4ed8";
+/** Where the clamp's label hangs, relative to the clamp: down, left, forward. */
+const CLAMP_LABEL_OFFSET: Point3 = [-0.62, -0.38, 0.4];
 
 // --------------------------------------------------------------------------- //
 // A cable that shows current flowing through it
@@ -77,21 +79,47 @@ function FlowLine({
 function MainBoard({
   wiring,
   circuits,
+  mainOn,
+  onToggle,
 }: {
   wiring: Wiring;
   /** One entry per breaker: its room's name and whether anything in it is on. */
   circuits: { name: string; live: boolean }[];
+  mainOn: boolean;
+  onToggle?: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
   const [width, height] = wiring.boardSize;
   const [bx, by, bz] = wiring.board;
   const breakerWidth = Math.min(0.12, (width - 0.45) / Math.max(circuits.length, 1));
   const firstX = -width / 2 + 0.2;
 
   return (
-    <group position={[bx, by, bz]}>
+    <group
+      position={[bx, by, bz]}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle?.();
+      }}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+        if (onToggle) document.body.style.cursor = "pointer";
+      }}
+      onPointerOut={() => {
+        setHovered(false);
+        document.body.style.cursor = "auto";
+      }}
+    >
       {/* enclosure */}
       <RoundedBox args={[width, height, 0.14]} radius={0.03} smoothness={2} castShadow>
-        <meshStandardMaterial color="#d6dbe3" roughness={0.6} metalness={0.15} />
+        <meshStandardMaterial
+          color={hovered ? "#e8edf5" : "#d6dbe3"}
+          emissive={hovered ? "#1e3a8a" : "#000000"}
+          emissiveIntensity={hovered ? 0.25 : 0}
+          roughness={0.6}
+          metalness={0.15}
+        />
       </RoundedBox>
       {/* DIN rail */}
       <mesh position={[0, 0.02, 0.075]}>
@@ -99,11 +127,17 @@ function MainBoard({
         <meshStandardMaterial color="#9aa3b2" metalness={0.6} roughness={0.35} />
       </mesh>
 
-      {/* main switch, wider and red */}
-      <mesh position={[width / 2 - 0.16, 0.02, 0.1]}>
-        <boxGeometry args={[0.16, 0.26, 0.06]} />
-        <meshStandardMaterial color="#b91c1c" roughness={0.5} />
-      </mesh>
+      {/* main switch: wider, red, its handle up when on and down when off */}
+      <group position={[width / 2 - 0.16, 0.02, 0.1]}>
+        <mesh>
+          <boxGeometry args={[0.16, 0.26, 0.06]} />
+          <meshStandardMaterial color="#b91c1c" roughness={0.5} />
+        </mesh>
+        <mesh position={[0, mainOn ? 0.06 : -0.06, 0.045]}>
+          <boxGeometry args={[0.07, 0.07, 0.04]} />
+          <meshStandardMaterial color="#111827" />
+        </mesh>
+      </group>
 
       {/* one breaker per room circuit; its indicator lights while it carries load */}
       {circuits.map((circuit, index) => {
@@ -135,11 +169,33 @@ function MainBoard({
         center
         distanceFactor={11}
         zIndexRange={[15, 0]}
-        style={{ pointerEvents: "none" }}
+        style={{ pointerEvents: onToggle ? "auto" : "none" }}
       >
-        <div className="whitespace-nowrap rounded-md border border-slate-500/40 bg-slate-950/80 px-2 py-0.5 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-300 backdrop-blur-md">
-          Main board · {circuits.length} circuits
-        </div>
+        <button
+          type="button"
+          data-label-priority={70}
+          disabled={!onToggle}
+          onClick={onToggle}
+          aria-label={`Main switch: turn ${mainOn ? "off" : "on"}`}
+          className={
+            "block cursor-pointer whitespace-nowrap rounded-md border px-2 py-0.5 text-center backdrop-blur-md transition-colors disabled:cursor-default " +
+            (mainOn
+              ? "border-slate-500/40 bg-slate-950/80 hover:border-slate-300/70"
+              : "border-red-500/60 bg-red-950/80 hover:border-red-400")
+          }
+        >
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+            Main board · {circuits.length} circuits ·{" "}
+            <span className={mainOn ? "text-emerald-400" : "text-red-400"}>
+              {mainOn ? "on" : "off"}
+            </span>
+          </div>
+          {onToggle ? (
+            <div className="text-[9px] text-slate-400">
+              click to switch {mainOn ? "off" : "on"}
+            </div>
+          ) : null}
+        </button>
       </Html>
     </group>
   );
@@ -202,8 +258,17 @@ function SctClamp({
         </mesh>
       </group>
 
+      {/* The label sits off to one side with a leader line, so it never
+          covers the clamp it is describing. */}
+      <Line
+        points={[[0, 0, 0], CLAMP_LABEL_OFFSET]}
+        color="#60a5fa"
+        lineWidth={1}
+        transparent
+        opacity={0.7}
+      />
       <Html
-        position={[0, -0.36, 0.08]}
+        position={CLAMP_LABEL_OFFSET}
         center
         distanceFactor={10}
         zIndexRange={[25, 0]}
@@ -217,6 +282,7 @@ function SctClamp({
           onPointerEnter={() => setHovered(true)}
           onPointerLeave={() => setHovered(false)}
           aria-label="SCT-013 clamp: how it works"
+          data-label-priority={80}
           className="block cursor-pointer whitespace-nowrap rounded-md border px-2 py-1 text-center backdrop-blur-md transition-colors disabled:cursor-default"
           style={{
             borderColor: hovered ? "rgba(96,165,250,0.9)" : "rgba(96,165,250,0.45)",
@@ -256,7 +322,10 @@ function EdgeMeter({ position, powerW }: { position: Point3; powerW: number }) {
         zIndexRange={[15, 0]}
         style={{ pointerEvents: "none" }}
       >
-        <div className="whitespace-nowrap rounded-md border border-cyan-500/30 bg-slate-950/80 px-2 py-0.5 text-center backdrop-blur-md">
+        <div
+          data-label-priority={60}
+          className="whitespace-nowrap rounded-md border border-cyan-500/30 bg-slate-950/80 px-2 py-0.5 text-center backdrop-blur-md"
+        >
           <div className="text-[9px] font-semibold uppercase tracking-wider text-cyan-300">
             Edge meter · ESP32
           </div>
@@ -279,7 +348,9 @@ export function PowerSystem({
   appliances,
   currentA,
   powerW,
+  mainOn,
   onSelectClamp,
+  onToggleMain,
 }: {
   wiring: Wiring;
   roomNames: Record<string, string>;
@@ -287,7 +358,9 @@ export function PowerSystem({
   /** RMS current measured at the mains — the clamp's reading. */
   currentA: number;
   powerW: number;
+  mainOn: boolean;
   onSelectClamp?: () => void;
+  onToggleMain?: () => void;
 }) {
   const byId = Object.fromEntries(appliances.map((a) => [a.id, a]));
   const liveRooms = new Set(appliances.filter((a) => a.detected).map((a) => a.room_id));
@@ -309,8 +382,10 @@ export function PowerSystem({
         wiring={wiring}
         circuits={wiring.circuits.map((circuit) => ({
           name: roomNames[circuit.roomId] ?? circuit.roomId,
-          live: liveRooms.has(circuit.roomId),
+          live: mainOn && liveRooms.has(circuit.roomId),
         }))}
+        mainOn={mainOn}
+        onToggle={onToggleMain}
       />
       <SctClamp position={wiring.clamp} currentA={currentA} onSelect={onSelectClamp} />
       <EdgeMeter position={wiring.meter} powerW={powerW} />

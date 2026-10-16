@@ -563,6 +563,17 @@ and the figures cannot disagree.
   junction in that room and on to every device in it. Cables to devices that
   are running carry moving pulses, and the supply pulses faster as the total
   current rises: the picture of *everything flowing through one sensor*.
+- **Click the main board** (or its label) to throw the main switch. Off cuts
+  the whole house: the clamp reads zero, every cable goes idle, fans coast to
+  a stop. Each appliance keeps its own switch position, so whatever was on
+  starts again, inrush and all, when the main comes back.
+- **Full screen** (bottom-right of the scene) fills the screen with the house
+  and closes the sidebar; **Menu** brings it back as an overlay, and Esc or
+  **Exit full screen** returns to the normal layout. The device inspector
+  floats over the scene.
+- **Labels stay readable.** Overlapping labels are faded out, keeping the
+  selected or hovered device, the clamp, the board, detection errors and the
+  biggest loads first.
 - **Click the SCT clamp** (or its label) for a six-step animated explanation
   of what it does: one cable carries everything, current makes a magnetic
   field, the clamp's coil catches it, a 2000x-smaller copy goes to the meter,
@@ -601,6 +612,7 @@ Full interactive docs at `/docs`. Summary:
 | `POST` | `/api/simulation/scenario` | Switch scenario |
 | `POST` | `/api/simulation/mode` | Demo / Simulation / Replay |
 | `POST` | `/api/simulation/appliance` | Switch one appliance by hand |
+| `POST` | `/api/simulation/main-switch` | Throw the main switch on the board (`{"on": false}` cuts the whole house) |
 | `GET` `POST` | `/api/simulation/recordings[/start\|/stop]` | Record and list runs |
 
 ### Cost, history, reports
