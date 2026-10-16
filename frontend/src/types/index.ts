@@ -163,6 +163,8 @@ export interface LiveFrame {
   scenario: string;
   speed: number;
   run_id: string;
+  /** The main switch on the distribution board. */
+  main_on: boolean;
   measurement: Measurement;
   energy: EnergyBlock;
   cost: CostBlock;

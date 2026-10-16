@@ -557,6 +557,28 @@ and the figures cannot disagree.
   legible at a glance. Appliances are grouped the way a household groups them:
   the kitchen holds the refrigerator, microwave, mixer, induction stove and tube
   light; the bedroom holds the air conditioner and phone charger; and so on.
+- **The wiring is drawn.** The mains supply rises up the front wall to the
+  main distribution board, through an SCT-013 clamp whose lead runs to the
+  edge meter (ESP32). One breaker per room feeds a cable under the floor to a
+  junction in that room and on to every device in it. Cables to devices that
+  are running carry moving pulses, and the supply pulses faster as the total
+  current rises: the picture of *everything flowing through one sensor*.
+- **Click the main board** (or its label) to throw the main switch. Off cuts
+  the whole house: the clamp reads zero, every cable goes idle, fans coast to
+  a stop. Each appliance keeps its own switch position, so whatever was on
+  starts again, inrush and all, when the main comes back.
+- **Full screen** (bottom-right of the scene) fills the screen with the house
+  and closes the sidebar; **Menu** brings it back as an overlay, and Esc or
+  **Exit full screen** returns to the normal layout. The device inspector
+  floats over the scene.
+- **Labels stay readable.** Overlapping labels are faded out, keeping the
+  selected or hovered device, the clamp, the board, detection errors and the
+  biggest loads first.
+- **Click the SCT clamp** (or its label) for a six-step animated explanation
+  of what it does: one cable carries everything, current makes a magnetic
+  field, the clamp's coil catches it, a 2000x-smaller copy goes to the meter,
+  the meter samples its shape, and the AI reads which appliances are running.
+  The numbers and the waveform in it are live.
 - **Rooms added from the admin pages appear east of the original house**, and
   devices are placed automatically on the ceiling, a wall, the floor or a small
   table according to their type.
@@ -590,6 +612,7 @@ Full interactive docs at `/docs`. Summary:
 | `POST` | `/api/simulation/scenario` | Switch scenario |
 | `POST` | `/api/simulation/mode` | Demo / Simulation / Replay |
 | `POST` | `/api/simulation/appliance` | Switch one appliance by hand |
+| `POST` | `/api/simulation/main-switch` | Throw the main switch on the board (`{"on": false}` cuts the whole house) |
 | `GET` `POST` | `/api/simulation/recordings[/start\|/stop]` | Record and list runs |
 
 ### Cost, history, reports

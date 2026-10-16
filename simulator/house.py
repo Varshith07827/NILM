@@ -45,6 +45,9 @@ BASE_SWITCH_ON_INTERVAL_S: float = 2400.0
 #: How long a manual toggle from the dashboard suppresses autonomous control.
 MANUAL_HOLD_S: float = 600.0
 
+#: Event id used for the main switch on the distribution board.
+MAIN_SWITCH_ID: str = "__main__"
+
 #: Correlation of the slow load random walk between consecutive seconds.
 FLUCTUATION_MEMORY: float = 0.92
 
@@ -193,6 +196,9 @@ class VirtualHouse:
         self._build_states(devices if devices is not None else catalogue_devices())
 
         self.sim_seconds: float = 0.0
+        #: The main switch on the distribution board. Off cuts every device,
+        #: but each one keeps its own on/off state for when power returns.
+        self.main_on: bool = True
         self._grid_drift_v: float = 0.0
         self._script_cursor: int = 0
         self._pending_events: list[ApplianceEvent] = []
@@ -303,6 +309,7 @@ class VirtualHouse:
         self._grid_drift_v = 0.0
         self._script_cursor = 0
         self._pending_events.clear()
+        self.main_on = True
         self._apply_scenario_defaults()
 
     # ------------------------------------------------------------------ #
@@ -366,6 +373,29 @@ class VirtualHouse:
                     power_w=0.0,
                 )
             )
+
+    def set_main(self, on: bool) -> ApplianceEvent | None:
+        """Throw the main switch on the distribution board."""
+        if on == self.main_on:
+            return None
+        self.main_on = on
+        if on:
+            # Everything still switched on at its socket starts again at once,
+            # inrush and all -- the surge a real house sees when power returns.
+            for state in self.states.values():
+                if state.socket_on:
+                    state.switched_on_at = self.sim_seconds
+                    state.duty_on = True
+        event = ApplianceEvent(
+            timestamp=self.sim_time,
+            appliance_id=MAIN_SWITCH_ID,
+            appliance_name="Main switch",
+            action=EventAction.ON if on else EventAction.OFF,
+            source=EventSource.MANUAL,
+            note="Switched at the main board",
+        )
+        self._pending_events.append(event)
+        return event
 
     def set_appliance(self, appliance_id: str, on: bool) -> ApplianceEvent | None:
         """Manual control from the dashboard."""
@@ -489,7 +519,10 @@ class VirtualHouse:
         t = time_axis(self.sim_seconds, SAMPLES_PER_WINDOW)
 
         # First pass: how much current is flowing, so the sag can be applied.
-        scales = {aid: s.power_scale for aid, s in self.states.items()}
+        powered = self.main_on
+        scales = {
+            aid: (s.power_scale if powered else 0.0) for aid, s in self.states.items()
+        }
         approx_total_a = sum(
             self.states[aid].spec.rms_current_a * scale for aid, scale in scales.items()
         )
@@ -529,7 +562,7 @@ class VirtualHouse:
             state.true_current_a = true_current
 
             truth.socket_on[aid] = state.socket_on
-            truth.drawing[aid] = state.is_drawing
+            truth.drawing[aid] = powered and state.is_drawing
             truth.power_w[aid] = true_power
             truth.current_a[aid] = true_current
             truth.type_of[aid] = spec.kind

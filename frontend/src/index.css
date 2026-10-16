@@ -182,3 +182,13 @@
     scrollbar-width: none;
   }
 }
+
+/* 3-D scene labels: faded out when they would overlap a more important one
+   (see components/house/useLabelDeclutter.ts). */
+[data-label-priority] {
+  transition: opacity 160ms ease;
+}
+[data-label-hidden="true"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

@@ -52,6 +52,10 @@ class ResetRequest(BaseModel):
     clear_history: bool = True
 
 
+class MainSwitchRequest(BaseModel):
+    on: bool
+
+
 class ApplianceToggleRequest(BaseModel):
     appliance_id: str = Field(..., min_length=1, max_length=32)
     on: bool

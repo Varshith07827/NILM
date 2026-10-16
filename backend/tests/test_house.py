@@ -357,3 +357,45 @@ def test_rerated_device_draws_more_current():
     for _ in range(5):
         window = house.step(1.0)
     assert window.ground_truth.power_w["fan"] == pytest.approx(150.0, rel=0.1)
+
+
+class TestMainSwitch:
+    def test_main_off_cuts_every_device_and_restores_them(self):
+        house = VirtualHouse("custom", SimulationMode.DEMO, seed=9)
+        house.set_appliance("fan", True)
+        house.set_appliance("tv", True)
+        for _ in range(3):
+            house.step(1.0)
+
+        assert house.set_main(False) is not None
+        window = house.step(1.0)
+        assert not any(window.ground_truth.drawing.values())
+        assert sum(window.ground_truth.power_w.values()) == pytest.approx(0.0, abs=1e-6)
+        # The meter now sees only its own noise floor.
+        assert float(np.sqrt(np.mean(window.current**2))) < 0.05
+        # Each device keeps its switch position for when power returns.
+        assert house.states["fan"].socket_on and house.states["tv"].socket_on
+
+        assert house.set_main(True) is not None
+        window = house.step(1.0)
+        assert window.ground_truth.drawing["fan"] and window.ground_truth.drawing["tv"]
+
+    def test_setting_the_same_state_is_a_no_op(self):
+        house = VirtualHouse("custom", SimulationMode.DEMO, seed=9)
+        assert house.set_main(True) is None
+
+    def test_main_switch_api(self, client):
+        pipeline = client.app.state.pipeline
+        try:
+            response = client.post("/api/simulation/main-switch", json={"on": False})
+            assert response.status_code == 200
+            assert response.json()["detail"]["main_on"] is False
+            advance(client, windows=2)
+            frame = pipeline.latest_frame
+            assert frame["main_on"] is False
+            assert frame["measurement"]["power_w"] < 5.0
+            assert any(a["title"] == "Main power switched off" for a in pipeline.recent_alerts)
+        finally:
+            client.post("/api/simulation/main-switch", json={"on": True})
+        advance(client, windows=1)
+        assert pipeline.latest_frame["main_on"] is True

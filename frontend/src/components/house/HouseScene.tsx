@@ -14,10 +14,15 @@
  */
 
 import { Html, OrbitControls, RoundedBox } from "@react-three/drei";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
+import { PowerSystem } from "@/components/house/PowerSystem";
+import {
+  deviceLabelPriority,
+  useLabelDeclutter,
+} from "@/components/house/useLabelDeclutter";
 import {
   MODEL_HEIGHT,
   applianceModel,
@@ -250,6 +255,12 @@ function ApplianceNode({
           style={{ pointerEvents: "none" }}
         >
           <div
+            data-label-priority={deviceLabelPriority({
+              selected,
+              hovered,
+              error: missed || falsePositive,
+              watts: appliance.estimated_power_w,
+            })}
             className="whitespace-nowrap rounded-md border px-2 py-1 text-center backdrop-blur-md"
             style={{
               borderColor: missed
@@ -303,7 +314,7 @@ function RoomLabel({ room, watts }: { room: RoomSpec; watts: number }) {
       zIndexRange={[10, 0]}
       style={{ pointerEvents: "none" }}
     >
-      <div className="select-none text-center">
+      <div data-label-priority={watts > 0.5 ? 8 : 5} className="select-none text-center">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400/80">
           {room.name}
         </div>
@@ -363,9 +374,23 @@ interface HouseSceneProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   cameraPosition: [number, number, number];
+  /** Mains RMS current, read by the SCT clamp. */
+  currentA: number;
+  /** Mains real power, shown on the edge meter. */
+  powerW: number;
+  mainOn: boolean;
+  onSelectClamp?: () => void;
+  onToggleMain?: () => void;
 }
 
 /** Smoothly flies the camera to a new preset instead of snapping. */
+/**
+ * Flies the camera to a preset when one is chosen, instead of snapping.
+ *
+ * It moves the camera only during a flight: one starts when the preset (or
+ * the house's layout) changes and ends on arrival -- or the moment the user
+ * grabs the view, so dragging, panning and zooming are never pulled back.
+ */
 function CameraRig({
   target,
   lookAt,
@@ -373,15 +398,53 @@ function CameraRig({
   target: [number, number, number];
   lookAt: [number, number, number];
 }) {
+  const controls = useThree((state) => state.controls) as unknown as {
+    target: THREE.Vector3;
+    update: () => void;
+    addEventListener: (type: string, listener: () => void) => void;
+    removeEventListener: (type: string, listener: () => void) => void;
+  } | null;
+  const aspect = useThree((state) => state.size.width / Math.max(state.size.height, 1));
   const desired = useRef(new THREE.Vector3(...target));
-  desired.current.set(...target);
+  const focus = useRef(new THREE.Vector3(...lookAt));
+  const flying = useRef(true);
+  // Presets are framed for a landscape view; on a tall, narrow one (a phone,
+  // a narrow window in full screen) back off so the house still fits across.
+  const fit = Math.max(1, 1.35 / aspect);
+  const key = `${target.join(",")}|${lookAt.join(",")}|${fit.toFixed(2)}`;
+
+  useEffect(() => {
+    focus.current.set(...lookAt);
+    desired.current
+      .set(...target)
+      .sub(focus.current)
+      .multiplyScalar(fit)
+      .add(focus.current);
+    flying.current = true;
+    // `key` captures the values; the arrays themselves are new every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  useEffect(() => {
+    if (!controls) return;
+    const stop = () => {
+      flying.current = false;
+    };
+    controls.addEventListener("start", stop);
+    return () => controls.removeEventListener("start", stop);
+  }, [controls]);
 
   useFrame((state) => {
-    // Only drive the camera while it is meaningfully away from the preset, so
-    // the user's own orbiting is never fought by this rig.
-    if (state.camera.position.distanceTo(desired.current) > 0.05) {
-      state.camera.position.lerp(desired.current, 0.06);
-      state.camera.lookAt(...lookAt);
+    if (!flying.current) return;
+    state.camera.position.lerp(desired.current, 0.08);
+    if (controls) {
+      controls.target.lerp(focus.current, 0.08);
+      controls.update();
+    } else {
+      state.camera.lookAt(focus.current);
+    }
+    if (state.camera.position.distanceTo(desired.current) < 0.03) {
+      flying.current = false;
     }
   });
   return null;
@@ -394,6 +457,11 @@ function SceneContents({
   showTruth,
   selectedId,
   onSelect,
+  currentA,
+  powerW,
+  mainOn,
+  onSelectClamp,
+  onToggleMain,
 }: Omit<HouseSceneProps, "cameraPosition">) {
   const byId = useMemo(
     () => Object.fromEntries(appliances.map((a) => [a.id, a])),
@@ -466,12 +534,27 @@ function SceneContents({
       {layout.rooms.map((room) => (
         <RoomLabel key={room.id} room={room} watts={roomWatts[room.id] ?? 0} />
       ))}
+
+      <PowerSystem
+        wiring={layout.wiring}
+        roomNames={Object.fromEntries(layout.rooms.map((room) => [room.id, room.name]))}
+        appliances={appliances}
+        currentA={currentA}
+        powerW={powerW}
+        mainOn={mainOn}
+        onSelectClamp={onSelectClamp}
+        onToggleMain={onToggleMain}
+      />
     </>
   );
 }
 
 export function HouseScene(props: HouseSceneProps) {
+  const container = useRef<HTMLDivElement>(null);
+  useLabelDeclutter(container);
+
   return (
+    <div ref={container} className="h-full w-full">
     <Canvas
       // three r186 removed PCFSoftShadowMap; "percentage" maps to PCFShadowMap,
       // which is what the default silently falls back to anyway.
@@ -505,5 +588,6 @@ export function HouseScene(props: HouseSceneProps) {
         dampingFactor={0.08}
       />
     </Canvas>
+    </div>
   );
 }

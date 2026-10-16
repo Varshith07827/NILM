@@ -31,7 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,7 @@ import { InfoTip } from "@/components/ui/tooltip";
 import { useAuth } from "@/state/auth";
 import { useLive } from "@/state/live";
 import { useNotifications } from "@/state/notifications";
+import { ShellContext, type ShellState } from "@/state/shell";
 import { cn, formatClock, formatCurrency, formatPower } from "@/lib/utils";
 
 interface NavItem {
@@ -102,6 +103,8 @@ export function AppShell() {
   const { unread } = useNotifications();
   const { admin } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const [immersive, setImmersive] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const { pathname } = useLocation();
 
   // A new page starts at the top, not wherever the last one was scrolled to.
@@ -109,26 +112,46 @@ export function AppShell() {
     window.scrollTo(0, 0);
   }, [pathname]);
 
+  const shell = useMemo<ShellState>(
+    () => ({ immersive, setImmersive, navOpen, setNavOpen }),
+    [immersive, navOpen],
+  );
+  // In full screen the sidebar is an overlay, always shown at full width.
+  const overlayNav = immersive && navOpen;
+  const narrow = collapsed && !overlayNav;
+
   const model = status?.model;
   const running = frame?.state === "running";
   const power = formatPower(frame?.measurement.power_w ?? 0);
 
   return (
+    <ShellContext.Provider value={shell}>
     <div className="flex min-h-screen">
+      {overlayNav ? (
+        <div
+          aria-hidden
+          className="fixed inset-0 z-[65] bg-background/60 backdrop-blur-sm"
+          onClick={() => setNavOpen(false)}
+        />
+      ) : null}
       {/* ------------------------------------------------------------- */}
       {/* sidebar                                                        */}
       {/* ------------------------------------------------------------- */}
+      {!immersive || navOpen ? (
       <aside
         className={cn(
-          "sticky top-0 z-40 flex h-screen shrink-0 flex-col border-r border-white/[0.06] bg-card/40 backdrop-blur-xl transition-[width] duration-200",
-          collapsed ? "w-[68px]" : "w-[232px]",
+          "top-0 flex h-screen shrink-0 flex-col border-r border-white/[0.06] backdrop-blur-xl transition-[width] duration-200",
+          overlayNav
+            ? "fixed left-0 z-[70] bg-card/95 shadow-2xl"
+            : "sticky z-40 bg-card/40",
+          narrow ? "w-[68px]" : "w-[232px]",
         )}
       >
         <div className="flex h-16 items-center gap-2.5 px-4">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/25 to-accent/25 ring-1 ring-inset ring-white/10">
             <Zap className="h-4.5 w-4.5 text-primary" />
           </div>
-          {!collapsed ? (
+          {!narrow ? (
             <div className="min-w-0 leading-tight">
               <p className="truncate text-[13px] font-bold tracking-tight">
                 Edge AI <span className="text-gradient">NILM</span>
@@ -143,7 +166,7 @@ export function AppShell() {
         <nav className="flex-1 space-y-3 overflow-y-auto px-2.5 py-3">
           {NAV_GROUPS.map((group) => (
             <div key={group.label} className="space-y-1">
-              {!collapsed ? (
+              {!narrow ? (
                 <p className="px-2.5 pb-0.5 text-[0.6rem] font-semibold uppercase tracking-wider text-muted-foreground/70">
                   {group.label}
                 </p>
@@ -163,13 +186,15 @@ export function AppShell() {
                     key={item.to}
                     to={item.to}
                     end={item.to === "/" || item.to === "/appliances"}
+                    // The overlay sidebar closes once it has been used.
+                    onClick={() => setNavOpen(false)}
                     className={({ isActive }) =>
                       cn(
                         "relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
                         isActive
                           ? "bg-primary/12 text-primary"
                           : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-                        collapsed && "justify-center px-0",
+                        narrow && "justify-center px-0",
                       )
                     }
                   >
@@ -179,8 +204,8 @@ export function AppShell() {
                           <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
                         ) : null}
                         <Icon className="h-4 w-4 shrink-0" />
-                        {!collapsed ? <span>{item.label}</span> : null}
-                        {!collapsed && badge ? (
+                        {!narrow ? <span>{item.label}</span> : null}
+                        {!narrow && badge ? (
                           <span
                             className={cn(
                               "ml-auto rounded px-1.5 text-[0.6rem] font-semibold",
@@ -200,7 +225,7 @@ export function AppShell() {
                 return (
                   <InfoTip
                     key={item.to}
-                    label={collapsed ? item.label : item.hint}
+                    label={narrow ? item.label : item.hint}
                     side="right"
                   >
                     <div>{link}</div>
@@ -212,7 +237,7 @@ export function AppShell() {
         </nav>
 
         {/* model summary at the foot of the rail */}
-        {!collapsed && model ? (
+        {!narrow && model ? (
           <div className="mx-2.5 mb-2 rounded-lg border border-border/50 bg-secondary/30 p-2.5">
             <p className="label-muted">Inference</p>
             <p className="mt-1 truncate font-mono text-[0.68rem] font-medium">
@@ -231,25 +256,27 @@ export function AppShell() {
           <Button
             variant="ghost"
             size="sm"
-            className={cn("w-full", collapsed && "px-0")}
+            className={cn("w-full", narrow && "px-0")}
             onClick={() => setCollapsed((value) => !value)}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={narrow ? "Expand sidebar" : "Collapse sidebar"}
           >
             <ChevronLeft
               className={cn(
                 "h-4 w-4 transition-transform",
-                collapsed && "rotate-180",
+                narrow && "rotate-180",
               )}
             />
-            {!collapsed ? <span>Collapse</span> : null}
+            {!narrow ? <span>Collapse</span> : null}
           </Button>
         </div>
       </aside>
+      ) : null}
 
       {/* ------------------------------------------------------------- */}
       {/* main column                                                    */}
       {/* ------------------------------------------------------------- */}
       <div className="flex min-w-0 flex-1 flex-col">
+        {!immersive ? (
         <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-background/70 backdrop-blur-xl">
           <div className="flex h-16 items-center gap-3 px-4 sm:px-6">
             {/* simulated clock */}
@@ -372,11 +399,13 @@ export function AppShell() {
             </Button>
           </div>
         </header>
+        ) : null}
 
-        <main className="flex-1 px-4 py-5 sm:px-6">
+        <main className={immersive ? "flex-1" : "flex-1 px-4 py-5 sm:px-6"}>
           <Outlet />
         </main>
 
+        {!immersive ? (
         <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 px-4 py-4 text-[0.68rem] text-muted-foreground sm:px-6">
           <p>
             Edge AI-Based Non-Intrusive Load Monitoring — appliance figures are
@@ -390,7 +419,9 @@ export function AppShell() {
             </p>
           ) : null}
         </footer>
+        ) : null}
       </div>
     </div>
+    </ShellContext.Provider>
   );
 }
