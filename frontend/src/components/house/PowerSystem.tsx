@@ -207,13 +207,20 @@ function SctClamp({
         center
         distanceFactor={10}
         zIndexRange={[25, 0]}
-        style={{ pointerEvents: "none" }}
+        // The label is the easy thing to click; the clamp itself is small.
+        style={{ pointerEvents: onSelect ? "auto" : "none" }}
       >
-        <div
-          className="whitespace-nowrap rounded-md border px-2 py-1 text-center backdrop-blur-md"
+        <button
+          type="button"
+          disabled={!onSelect}
+          onClick={onSelect}
+          onPointerEnter={() => setHovered(true)}
+          onPointerLeave={() => setHovered(false)}
+          aria-label="SCT-013 clamp: how it works"
+          className="block cursor-pointer whitespace-nowrap rounded-md border px-2 py-1 text-center backdrop-blur-md transition-colors disabled:cursor-default"
           style={{
             borderColor: hovered ? "rgba(96,165,250,0.9)" : "rgba(96,165,250,0.45)",
-            background: "rgba(8,13,22,0.85)",
+            background: hovered ? "rgba(23,37,84,0.9)" : "rgba(8,13,22,0.85)",
           }}
         >
           <div className="text-[10px] font-semibold uppercase tracking-wider text-blue-300">
@@ -225,7 +232,7 @@ function SctClamp({
           {onSelect ? (
             <div className="text-[9px] text-slate-400">click: how it works</div>
           ) : null}
-        </div>
+        </button>
       </Html>
     </group>
   );

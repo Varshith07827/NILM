@@ -12,6 +12,7 @@ import {
 import { Suspense, lazy, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { ClampExplainer } from "@/components/house/ClampExplainer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,6 +61,7 @@ export default function HomeView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preset, setPreset] = useState<CameraPreset>("isometric");
   const [busy, setBusy] = useState<string | null>(null);
+  const [explainClamp, setExplainClamp] = useState(false);
 
   const appliances = frame?.appliances ?? [];
   const rooms = frame?.rooms ?? [];
@@ -124,6 +126,9 @@ export default function HomeView() {
 
   return (
     <div className="space-y-4">
+      {explainClamp ? (
+        <ClampExplainer frame={frame} onClose={() => setExplainClamp(false)} />
+      ) : null}
       <PageHeader
         icon={Home}
         title="3D Home"
@@ -203,6 +208,7 @@ export default function HomeView() {
                   cameraPosition={cameraPosition(preset, layout)}
                   currentA={frame.measurement.current_a}
                   powerW={frame.measurement.power_w}
+                  onSelectClamp={() => setExplainClamp(true)}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">

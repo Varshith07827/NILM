@@ -563,6 +563,11 @@ and the figures cannot disagree.
   junction in that room and on to every device in it. Cables to devices that
   are running carry moving pulses, and the supply pulses faster as the total
   current rises: the picture of *everything flowing through one sensor*.
+- **Click the SCT clamp** (or its label) for a six-step animated explanation
+  of what it does: one cable carries everything, current makes a magnetic
+  field, the clamp's coil catches it, a 2000x-smaller copy goes to the meter,
+  the meter samples its shape, and the AI reads which appliances are running.
+  The numbers and the waveform in it are live.
 - **Rooms added from the admin pages appear east of the original house**, and
   devices are placed automatically on the ceiling, a wall, the floor or a small
   table according to their type.
