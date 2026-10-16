@@ -557,6 +557,12 @@ and the figures cannot disagree.
   legible at a glance. Appliances are grouped the way a household groups them:
   the kitchen holds the refrigerator, microwave, mixer, induction stove and tube
   light; the bedroom holds the air conditioner and phone charger; and so on.
+- **The wiring is drawn.** The mains supply rises up the front wall to the
+  main distribution board, through an SCT-013 clamp whose lead runs to the
+  edge meter (ESP32). One breaker per room feeds a cable under the floor to a
+  junction in that room and on to every device in it. Cables to devices that
+  are running carry moving pulses, and the supply pulses faster as the total
+  current rises: the picture of *everything flowing through one sensor*.
 - **Rooms added from the admin pages appear east of the original house**, and
   devices are placed automatically on the ceiling, a wall, the floor or a small
   table according to their type.

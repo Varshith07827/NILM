@@ -201,6 +201,8 @@ export default function HomeView() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   cameraPosition={cameraPosition(preset, layout)}
+                  currentA={frame.measurement.current_a}
+                  powerW={frame.measurement.power_w}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">

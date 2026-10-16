@@ -18,6 +18,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Suspense, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
+import { PowerSystem } from "@/components/house/PowerSystem";
 import {
   MODEL_HEIGHT,
   applianceModel,
@@ -363,6 +364,11 @@ interface HouseSceneProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   cameraPosition: [number, number, number];
+  /** Mains RMS current, read by the SCT clamp. */
+  currentA: number;
+  /** Mains real power, shown on the edge meter. */
+  powerW: number;
+  onSelectClamp?: () => void;
 }
 
 /** Smoothly flies the camera to a new preset instead of snapping. */
@@ -394,6 +400,9 @@ function SceneContents({
   showTruth,
   selectedId,
   onSelect,
+  currentA,
+  powerW,
+  onSelectClamp,
 }: Omit<HouseSceneProps, "cameraPosition">) {
   const byId = useMemo(
     () => Object.fromEntries(appliances.map((a) => [a.id, a])),
@@ -466,6 +475,15 @@ function SceneContents({
       {layout.rooms.map((room) => (
         <RoomLabel key={room.id} room={room} watts={roomWatts[room.id] ?? 0} />
       ))}
+
+      <PowerSystem
+        wiring={layout.wiring}
+        roomNames={Object.fromEntries(layout.rooms.map((room) => [room.id, room.name]))}
+        appliances={appliances}
+        currentA={currentA}
+        powerW={powerW}
+        onSelectClamp={onSelectClamp}
+      />
     </>
   );
 }

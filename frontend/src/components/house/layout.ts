@@ -169,6 +169,8 @@ export interface HouseLayout {
   centre: [number, number, number];
   /** Rough radius of the house, for camera distance. */
   radius: number;
+  /** The main board, the SCT clamp, and the cables to every device. */
+  wiring: Wiring;
 }
 
 /** Extra rooms continue the house eastward in a grid of these cells. */
@@ -350,9 +352,142 @@ export function layoutHouse(roomRefs: RoomRefLike[], devices: DeviceRef[]): Hous
     rooms,
     placements,
     furniture,
-    centre: [(minX + maxX) / 2, 0.6, (minZ + maxZ) / 2],
-    radius: Math.max(maxX - minX, maxZ - minZ) / 2,
+    // The board and supply sit in front of the house; keep them in frame.
+    centre: [(minX + maxX) / 2, 0.6, (minZ + maxZ + 1.2) / 2],
+    radius: Math.max(maxX - minX, maxZ - minZ + 1.2) / 2,
+    wiring: layoutWiring(rooms, placements),
   };
+}
+
+// --------------------------------------------------------------------------- //
+// Wiring: mains supply → SCT clamp → main board → rooms → devices
+// --------------------------------------------------------------------------- //
+
+export type Point3 = [number, number, number];
+
+export interface Wiring {
+  /** Centre of the main distribution board, on the front wall outside. */
+  board: Point3;
+  /** Width and height of the board. */
+  boardSize: [number, number];
+  /** Centre of the SCT-013 clamp, around the incoming live cable. */
+  clamp: Point3;
+  /** The edge meter (ESP32 + ADC) the clamp's lead plugs into. */
+  meter: Point3;
+  /** The incoming mains cable, from the street to the board. */
+  supply: Point3[];
+  /** The clamp's signal lead, to the meter. */
+  sensorLead: Point3[];
+  /** One circuit (breaker) per room: board to a junction in the room. */
+  circuits: { roomId: string; breaker: number; points: Point3[] }[];
+  /** Junction in the room to each device. */
+  branches: { deviceId: string; roomId: string; points: Point3[] }[];
+}
+
+/** Height of the under-floor cable runs, just above the floor plane. */
+const CABLE_Y = 0.035;
+
+function dedupe(points: Point3[]): Point3[] {
+  return points.filter(
+    (point, index) =>
+      index === 0 ||
+      Math.hypot(
+        point[0] - points[index - 1][0],
+        point[1] - points[index - 1][1],
+        point[2] - points[index - 1][2],
+      ) > 1e-3,
+  );
+}
+
+/**
+ * Where the power system sits and how the cables run.
+ *
+ * The board hangs on the outside of the front wall, where the supply comes in,
+ * so it faces the default camera. Each room is one circuit: a cable from its
+ * breaker runs under the floor to a junction in the middle of the room, and
+ * from there a branch runs to every device in it, rising at the end to the
+ * device's height (up the wall for a ceiling fan). It is a picture of the
+ * topology, not an electrician's drawing.
+ */
+export function layoutWiring(
+  rooms: RoomSpec[],
+  placements: AppliancePlacement[],
+): Wiring {
+  const xs = rooms.flatMap((room) => room.x);
+  const zs = rooms.flatMap((room) => room.z);
+  const minX = xs.length ? Math.min(...xs) : -6;
+  const maxX = xs.length ? Math.max(...xs) : 5;
+  const frontZ = zs.length ? Math.max(...zs) : 4;
+
+  const boardSize: [number, number] = [1.6, 1.15];
+  const boardX = Math.min(Math.max(-1.1, minX + 2.2), maxX - 2.2);
+  const wallZ = frontZ + 0.1;
+  const board: Point3 = [boardX, 1.05, wallZ + 0.08];
+  const boardBottom = board[1] - boardSize[1] / 2;
+
+  // The supply comes in under the ground, rises up the wall to the left of
+  // the board and enters its side; the clamp sits on that riser, where it is
+  // easy to see and to click.
+  const supplyX = boardX - boardSize[0] / 2 - 0.7;
+  const supplyZ = wallZ + 0.25;
+  const supply: Point3[] = [
+    [supplyX, -0.02, frontZ + 2.6],
+    [supplyX, CABLE_Y, frontZ + 2.6],
+    [supplyX, CABLE_Y, supplyZ],
+    [supplyX, board[1], supplyZ],
+    [boardX - boardSize[0] / 2, board[1], board[2]],
+  ];
+  const clamp: Point3 = [supplyX, 0.55, supplyZ];
+
+  // The edge meter hangs to the right of the board; the clamp's lead runs
+  // along the foot of the wall to it.
+  const meter: Point3 = [boardX + boardSize[0] / 2 + 0.6, 0.95, wallZ + 0.1];
+  const sensorLead: Point3[] = dedupe([
+    [clamp[0] + 0.12, clamp[1] - 0.03, clamp[2]],
+    [clamp[0] + 0.2, 0.12, clamp[2]],
+    [meter[0], 0.12, clamp[2]],
+    [meter[0], meter[1] - 0.18, meter[2] + 0.05],
+  ]);
+
+  const circuits = rooms.map((room, index) => {
+    const cx = (room.x[0] + room.x[1]) / 2;
+    const cz = (room.z[0] + room.z[1]) / 2;
+    // Each circuit leaves the board at its own breaker, so the bundle fans out.
+    const exitX = boardX - boardSize[0] / 2 + 0.2 + (index * (boardSize[0] - 0.55)) / Math.max(rooms.length - 1, 1);
+    const laneX = boardX - 0.6 + index * 0.09;
+    const points = dedupe([
+      [exitX, boardBottom, wallZ + 0.06],
+      [exitX, CABLE_Y, wallZ + 0.06],
+      [laneX, CABLE_Y, frontZ - 0.25],
+      [laneX, CABLE_Y, cz],
+      [cx, CABLE_Y, cz],
+    ]);
+    return { roomId: room.id, breaker: index, points };
+  });
+
+  const roomsById = Object.fromEntries(rooms.map((room) => [room.id, room]));
+  const branches = placements.flatMap((placement) => {
+    const room = roomsById[placement.roomId];
+    if (!room) return [];
+    const cx = (room.x[0] + room.x[1]) / 2;
+    const cz = (room.z[0] + room.z[1]) / 2;
+    const [px, py, pz] = placement.position;
+    const top = placement.ceiling ? py + 0.12 : Math.max(py, 0.1);
+    return [
+      {
+        deviceId: placement.id,
+        roomId: room.id,
+        points: dedupe([
+          [cx, CABLE_Y, cz],
+          [px, CABLE_Y, cz],
+          [px, CABLE_Y, pz],
+          [px, top, pz],
+        ]),
+      },
+    ];
+  });
+
+  return { board, boardSize, clamp, meter, supply, sensorLead, circuits, branches };
 }
 
 /** Camera framing presets, relative to the house as currently laid out. */
