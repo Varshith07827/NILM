@@ -122,6 +122,8 @@ export const api = {
     post<MessageResponse>("/simulation/scenario", { scenario_id }),
   setMode: (mode: string, recording_file?: string) =>
     post<MessageResponse>("/simulation/mode", { mode, recording_file }),
+  setMainSwitch: (on: boolean) =>
+    post<MessageResponse>("/simulation/main-switch", { on }),
   toggleAppliance: (appliance_id: string, on: boolean) =>
     post<MessageResponse>("/simulation/appliance", { appliance_id, on }),
 

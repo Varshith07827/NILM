@@ -46,10 +46,15 @@ from backend.app.core.config import Settings
 from backend.app.db.repositories.energy import TOTAL_KEY, UNATTRIBUTED_KEY
 from backend.app.services.cost import Tariff, get_tariff
 from backend.app.services.energy import EnergyTracker
-from backend.app.services.notifications import AlertContext, NotificationEngine
+from backend.app.services.notifications import (
+    Alert,
+    AlertContext,
+    AlertLevel,
+    NotificationEngine,
+)
 from simulator.appliances import APPLIANCE_CATALOGUE
 from simulator.devices import DeviceConfig, RoomConfig, catalogue_devices
-from simulator.house import RawWindow, VirtualHouse
+from simulator.house import MAIN_SWITCH_ID, RawWindow, VirtualHouse
 from simulator.replay import Recorder, Recording, RecordingPlayer, list_recordings
 from simulator.scenarios import SCENARIOS_BY_ID, SimulationMode
 from simulator.waveform import MAINS_FREQUENCY_HZ, SAMPLE_RATE_HZ
@@ -172,6 +177,9 @@ class NILMPipeline:
         self._event_rows: list[dict] = []
         self._notification_rows: list[dict] = []
         self._pending_events: list[_PendingEvent] = []
+        #: Alerts raised outside the rules engine (the main switch), sent with
+        #: the next window.
+        self._extra_alerts: list[Alert] = []
 
         # --- bookkeeping -------------------------------------------------- #
         self._previous_detected: set[str] = set()
@@ -331,6 +339,29 @@ class NILMPipeline:
         """Manual appliance control from the dashboard."""
         event = self.house.set_appliance(appliance_id, on)
         return event.to_dict() if event else None
+
+    def set_main(self, on: bool) -> dict | None:
+        """Main switch on the distribution board, from the dashboard."""
+        event = self.house.set_main(on)
+        if event is None:
+            return None
+        self._extra_alerts.append(
+            Alert(
+                sim_time=self.house.sim_time,
+                level=AlertLevel.SUCCESS if on else AlertLevel.WARNING,
+                category="supply",
+                title="Main power restored" if on else "Main power switched off",
+                message=(
+                    "The main switch is back on; appliances left switched on are "
+                    "starting again."
+                    if on
+                    else "The main switch on the board is off. Nothing in the house "
+                    "has power."
+                ),
+            )
+        )
+        self._broadcast_status()
+        return event.to_dict()
 
     def apply_house(self, rooms: list[RoomConfig], devices: list[DeviceConfig]) -> None:
         """Swap in an edited house configuration without stopping the loop.
@@ -521,6 +552,8 @@ class NILMPipeline:
                 specs=specs,
             )
         )
+        alerts = [*self._extra_alerts, *alerts]
+        self._extra_alerts = []
         for alert in alerts:
             payload = alert.to_dict()
             self.recent_alerts.appendleft(payload)
@@ -581,6 +614,9 @@ class NILMPipeline:
         for event in window.events:
             payload = event.to_dict()
             self.recent_events.appendleft(payload)
+            if event.appliance_id == MAIN_SWITCH_ID:
+                # Not a device: nothing for the model to confirm.
+                continue
             row = {
                 "sim_time": event.timestamp,
                 "recorded_at": datetime.now(),
@@ -812,6 +848,7 @@ class NILMPipeline:
             "scenario": self.scenario_id,
             "speed": self.speed,
             "run_id": self.run_id,
+            "main_on": self.house.main_on,
             "measurement": {
                 "current_a": round(features.i_rms, 4),
                 "voltage_v": round(features.v_rms, 2),
@@ -919,6 +956,7 @@ class NILMPipeline:
             "mode": self.mode.value,
             "speed": self.speed,
             "seed": self.seed,
+            "main_on": self.house.main_on,
             "run_id": self.run_id,
             "scenario": {
                 "id": scenario.id,

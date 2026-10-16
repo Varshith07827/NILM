@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from backend.app.api.deps import PipelineDep
 from backend.app.schemas.api import (
     ApplianceToggleRequest,
+    MainSwitchRequest,
     MessageResponse,
     ModeRequest,
     RecordingRequest,
@@ -86,6 +87,22 @@ async def set_mode(request: ModeRequest, pipeline: PipelineDep) -> MessageRespon
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return MessageResponse(
         message=f"mode set to {request.mode}", detail=pipeline.status()
+    )
+
+
+@router.post("/main-switch", response_model=MessageResponse)
+async def set_main_switch(
+    request: MainSwitchRequest, pipeline: PipelineDep
+) -> MessageResponse:
+    """Throw the main switch on the distribution board.
+
+    Off cuts power to the whole house; each device keeps its own switch
+    position, so whatever was on starts again when the main comes back.
+    """
+    event = pipeline.set_main(request.on)
+    return MessageResponse(
+        message=f"main switch {'on' if request.on else 'off'}",
+        detail={"event": event, "main_on": pipeline.house.main_on},
     )
 
 
